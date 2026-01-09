@@ -29,7 +29,16 @@ import {
 } from 'firebase/firestore';
 
 // --- CONFIGURATION ---
-const firebaseConfig = JSON.parse(__firebase_config);
+// Safely check if the environment variable exists to prevent ReferenceErrors
+const firebaseConfig = {
+  apiKey: "AIzaSyABvOntgfWBn3XvJbasB7zKXkLIvHADJkc",
+  authDomain: "homebar-95c2f.firebaseapp.com",
+  projectId: "homebar-95c2f",
+  storageBucket: "homebar-95c2f.firebasestorage.app",
+  messagingSenderId: "947971869072",
+  appId: "1:947971869072:web:a0648d987255f85f978b15"
+};
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -536,6 +545,7 @@ export default function HomeBarInventory() {
           <div className="flex items-center gap-3">
              <div className="p-2 rounded-lg bg-gradient-to-tr from-gray-700 to-gray-600"><BottleIcon className="text-white" size={20} /></div>
              <div><h1 className="font-bold text-lg">HomeBar</h1><p className={`text-xs ${theme.textMuted}`}>Inventory System</p></div>
+             <button onClick={() => setIsSettingsOpen(true)} className={`ml-2 p-1.5 ${theme.textMuted} hover:text-white hover:bg-white/5 rounded-lg transition-colors`}><Settings size={18} /></button>
           </div>
           <div className="flex gap-2">
             <button 
@@ -545,7 +555,6 @@ export default function HomeBarInventory() {
             >
               <Sparkles size={20} className={selectionMode ? 'text-yellow-300' : ''} />
             </button>
-            <button onClick={() => setIsSettingsOpen(true)} className={`p-2 rounded-full ${theme.bgMain} ${theme.textMuted} hover:text-white border ${theme.border} transition-colors`}><Settings size={20} /></button>
             {!selectionMode && (
               <button onClick={openAddModal} className={`${theme.accentBg} ${theme.accentBgHover} text-white p-2 px-4 rounded-lg shadow-lg flex items-center gap-2 font-medium active:scale-95 transition-all`}>
                 <Plus size={20} /> <span className="hidden sm:inline">Add</span>
