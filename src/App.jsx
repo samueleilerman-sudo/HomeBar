@@ -29,13 +29,13 @@ import {
 
 // --- CONFIGURATION ---
 // Handles both sandbox environment and standalone deployment
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+const firebaseConfig = {
+  apiKey: "AIzaSyABvOntgfWBn3XvJbasB7zKXkLIvHADJkc",
+  authDomain: "homebar-95c2f.firebaseapp.com",
+  projectId: "homebar-95c2f",
+  storageBucket: "homebar-95c2f.firebasestorage.app",
+  messagingSenderId: "947971869072",
+  appId: "1:947971869072:web:a0648d987255f85f978b15"
 };
 
 const app = initializeApp(firebaseConfig);
