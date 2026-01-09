@@ -29,14 +29,12 @@ import {
 } from 'firebase/firestore';
 
 // --- CONFIGURATION ---
-const firebaseConfig = {
-  apiKey: "AIzaSyABvOntgfWBn3XvJbasB7zKXkLIvHADJkc",
-  authDomain: "homebar-95c2f.firebaseapp.com",
-  projectId: "homebar-95c2f",
-  storageBucket: "homebar-95c2f.firebasestorage.app",
-  messagingSenderId: "947971869072",
-  appId: "1:947971869072:web:a0648d987255f85f978b15"
-};
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
 // --- API Key for AI ---
 const apiKey = ""; // Injected at runtime
 
