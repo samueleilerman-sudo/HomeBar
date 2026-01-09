@@ -2,14 +2,17 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Plus, Search, Wine, Trash2, Minus, X, Loader2, Edit2, NotebookPen, 
   Sparkles, CheckCircle2, Circle, Settings, RefreshCw, AlertTriangle, 
-  Package, Palette, Lightbulb, History, ChevronRight, Upload, Link as LinkIcon, ExternalLink 
+  Package, Palette, Lightbulb, History, ChevronRight, Upload, Link as LinkIcon, ExternalLink, LogOut, Cloud, User
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
   signInAnonymously, 
   onAuthStateChanged, 
-  signInWithCustomToken 
+  signInWithCustomToken,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signOut
 } from 'firebase/auth';
 import { 
   getFirestore, 
@@ -25,14 +28,14 @@ import {
 } from 'firebase/firestore';
 
 // --- CONFIGURATION ---
-// Validates if running in the Canvas environment or standalone
-const firebaseConfig = {
-  apiKey: "AIzaSyABvOntgfWBn3XvJbasB7zKXkLIvHADJkc",
-  authDomain: "homebar-95c2f.firebaseapp.com",
-  projectId: "homebar-95c2f",
-  storageBucket: "homebar-95c2f.firebasestorage.app",
-  messagingSenderId: "947971869072",
-  appId: "1:947971869072:web:a0648d987255f85f978b15"
+// Handles both sandbox environment and standalone deployment
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
 };
 
 const app = initializeApp(firebaseConfig);
@@ -146,13 +149,18 @@ export default function HomeBarInventory() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  
-  // Confirmation
-  const [confirmation, setConfirmation] = useState({ isOpen: false, type: null, id: null, name: '' });
 
   // Settings UI
   const [newCatName, setNewCatName] = useState('');
   const [newLocName, setNewLocName] = useState('');
+
+  // Confirmation State
+  const [confirmation, setConfirmation] = useState({
+    isOpen: false,
+    type: null,
+    id: null,
+    name: ''
+  });
 
   // AI & Selection
   const [selectionMode, setSelectionMode] = useState(false);
@@ -188,8 +196,7 @@ export default function HomeBarInventory() {
     if (!user) return;
     
     // Inventory (Standard path: artifacts/{appId}/users/{uid}/inventory)
-    // Note: Using artifacts path for canvas compatibility
-    const q = query(collection(db, 'users', user.uid, 'inventory'));
+    const q = query(collection(db, 'artifacts', appId, 'users', user.uid, 'inventory'));
     const unsubInv = onSnapshot(q, (snapshot) => {
       const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setInventory(items.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)));
@@ -197,7 +204,7 @@ export default function HomeBarInventory() {
     });
 
     // Settings (Standard path: artifacts/{appId}/users/{uid}/settings)
-    const settingsRef = doc(db, 'users', user.uid, 'settings', 'preferences');
+    const settingsRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences');
     const unsubSettings = onSnapshot(settingsRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -220,35 +227,58 @@ export default function HomeBarInventory() {
   // --- Logic Helpers ---
   const saveTheme = async (t) => {
     setTheme(t);
-    if(user) await updateDoc(doc(db, 'users', user.uid, 'settings', 'preferences'), { themeId: t.id }).catch(()=>{});
+    if(user) await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences'), { themeId: t.id }).catch(()=>{});
   };
 
   const addCategory = async () => {
     if(!newCatName.trim()) return;
     const updated = [...categories, newCatName.trim()];
     setCategories(updated); setNewCatName('');
-    if(user) await updateDoc(doc(db, 'users', user.uid, 'settings', 'preferences'), { categories: updated }).catch(()=>{});
+    if(user) await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences'), { categories: updated }).catch(()=>{});
   };
 
   const removeCategory = async (cat) => {
     if(!confirm(`Delete category "${cat}"?`)) return;
     const updated = categories.filter(c => c !== cat);
     setCategories(updated);
-    if(user) await updateDoc(doc(db, 'users', user.uid, 'settings', 'preferences'), { categories: updated }).catch(()=>{});
+    if(user) await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences'), { categories: updated }).catch(()=>{});
   };
 
   const addLocation = async () => {
     if(!newLocName.trim()) return;
     const updated = [...locations, newLocName.trim()];
     setLocations(updated); setNewLocName('');
-    if(user) await updateDoc(doc(db, 'users', user.uid, 'settings', 'preferences'), { locations: updated }).catch(()=>{});
+    if(user) await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences'), { locations: updated }).catch(()=>{});
   };
 
   const removeLocation = async (loc) => {
     if(!confirm(`Delete location "${loc}"?`)) return;
     const updated = locations.filter(l => l !== loc);
     setLocations(updated);
-    if(user) await updateDoc(doc(db, 'users', user.uid, 'settings', 'preferences'), { locations: updated }).catch(()=>{});
+    if(user) await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences'), { locations: updated }).catch(()=>{});
+  };
+  
+  // Google Auth Helper
+  const handleGoogleLogin = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+      // Auth state listener will handle the rest
+      setIsSettingsOpen(false);
+    } catch (error) {
+      console.error("Login failed", error);
+      alert("Sign in failed. Note: Google Auth requires a deployed app, it may not work in this preview.");
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      // Re-trigger anonymous sign in after sign out
+      await signInAnonymously(auth);
+    } catch (error) {
+      console.error("Logout error", error);
+    }
   };
 
   // Form Logic
@@ -292,9 +322,9 @@ export default function HomeBarInventory() {
 
     try {
       if (editingId) {
-        await updateDoc(doc(db, 'users', user.uid, 'inventory', editingId), payload);
+        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'inventory', editingId), payload);
       } else {
-        await addDoc(collection(db, 'users', user.uid, 'inventory'), payload);
+        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'inventory'), payload);
       }
       setIsModalOpen(false);
     } catch (e) { console.error(e); }
@@ -304,7 +334,7 @@ export default function HomeBarInventory() {
   const updateQuantity = async (e, id, current, change) => {
     if(e) e.stopPropagation();
     if (current + change < 0) return;
-    await updateDoc(doc(db, 'users', user.uid, 'inventory', id), { quantity: current + change });
+    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'inventory', id), { quantity: current + change });
   };
 
   // --- Confirmation Helpers ---
@@ -321,7 +351,7 @@ export default function HomeBarInventory() {
   const executeConfirmation = async () => {
     if (!confirmation.id) return;
     try {
-      const docRef = doc(db, 'users', user.uid, 'inventory', confirmation.id);
+      const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'inventory', confirmation.id);
       
       if (confirmation.type === 'empty') {
         await updateDoc(docRef, { quantity: 0 });
@@ -671,6 +701,45 @@ export default function HomeBarInventory() {
             
             <div className="p-6 overflow-y-auto space-y-6">
 
+              {/* 0. Sync / Account (New) */}
+              <div className="space-y-3">
+                <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider`}>Sync & Account</h3>
+                {user && user.isAnonymous ? (
+                  <button 
+                    onClick={handleGoogleLogin}
+                    className={`w-full p-3 rounded-xl border border-dashed ${theme.border} hover:border-indigo-500 hover:bg-indigo-500/10 transition-all flex items-center justify-between group ${theme.bgCard}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-full bg-slate-800 group-hover:bg-slate-700 transition-colors`}>
+                        <Cloud size={18} className="text-indigo-400" />
+                      </div>
+                      <div className="text-left">
+                        <p className={`font-bold ${theme.textMain} text-sm`}>Sign in to Sync</p>
+                        <p className={`text-[10px] ${theme.textMuted}`}>Save inventory to cloud</p>
+                      </div>
+                    </div>
+                    <div className={`${theme.textMuted} group-hover:text-white`}>→</div>
+                  </button>
+                ) : (
+                  <button 
+                    onClick={handleLogout}
+                    className={`w-full p-3 rounded-xl border ${theme.border} hover:border-red-500 hover:bg-red-500/10 transition-all flex items-center justify-between group ${theme.bgCard}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-full bg-slate-800 group-hover:bg-slate-700 transition-colors`}>
+                        <LogOut size={18} className="text-red-400" />
+                      </div>
+                      <div className="text-left">
+                        <p className={`font-bold ${theme.textMain} text-sm`}>Sign Out</p>
+                        <p className={`text-[10px] ${theme.textMuted}`}>{user?.email || 'Logged In'}</p>
+                      </div>
+                    </div>
+                  </button>
+                )}
+              </div>
+
+              <div className={`h-px ${theme.bgCard}`} />
+
               {/* 1. Empty Bottles History */}
               <div className="space-y-3">
                 <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider`}>History</h3>
@@ -823,9 +892,16 @@ export default function HomeBarInventory() {
               {/* 5. Profile */}
               <div className="space-y-3">
                 <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider`}>Profile</h3>
-                <div className={`${theme.bgInput} p-3 rounded-lg border ${theme.border}`}><p className={`text-[10px] ${theme.textMuted} uppercase font-bold mb-1`}>User ID</p><p className="text-xs text-slate-300 font-mono truncate">{user?.uid || 'Not signed in'}</p></div>
+                <div className={`${theme.bgInput} p-3 rounded-lg border ${theme.border}`}>
+                  <p className={`text-[10px] ${theme.textMuted} uppercase font-bold mb-1`}>User ID</p>
+                  <p className="text-xs text-slate-300 font-mono truncate">{user?.uid || 'Not signed in'}</p>
+                  <div className="flex gap-2 mt-2">
+                    <div className="text-[10px] bg-green-900/30 text-green-400 px-2 py-0.5 rounded border border-green-800">Online</div>
+                    {user?.isAnonymous && <div className="text-[10px] bg-amber-900/30 text-amber-400 px-2 py-0.5 rounded border border-amber-800">Anonymous</div>}
+                  </div>
+                </div>
               </div>
-              <div className={`text-center pt-4 border-t border-white/5`}><p className={`text-xs ${theme.textMuted}`}>HomeBar v2.0.0</p></div>
+              <div className={`text-center pt-4 border-t border-white/5`}><p className={`text-xs ${theme.textMuted}`}>HomeBar v2.1.0</p></div>
             </div>
           </div>
         </div>
