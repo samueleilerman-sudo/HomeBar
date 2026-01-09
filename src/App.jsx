@@ -196,7 +196,7 @@ export default function HomeBarInventory() {
     if (!user) return;
     
     // Inventory (Standard path: artifacts/{appId}/users/{uid}/inventory)
-    const q = query(collection(db, 'artifacts', appId, 'users', user.uid, 'inventory'));
+    const q = query(collection(db, 'users', user.uid, 'inventory'));
     const unsubInv = onSnapshot(q, (snapshot) => {
       const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setInventory(items.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)));
@@ -204,7 +204,7 @@ export default function HomeBarInventory() {
     });
 
     // Settings (Standard path: artifacts/{appId}/users/{uid}/settings)
-    const settingsRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences');
+    const settingsRef = doc(db, 'users', user.uid, 'settings', 'preferences');
     const unsubSettings = onSnapshot(settingsRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -227,35 +227,35 @@ export default function HomeBarInventory() {
   // --- Logic Helpers ---
   const saveTheme = async (t) => {
     setTheme(t);
-    if(user) await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences'), { themeId: t.id }).catch(()=>{});
+    if(user) await updateDoc(doc(db, 'users', user.uid, 'settings', 'preferences'), { themeId: t.id }).catch(()=>{});
   };
 
   const addCategory = async () => {
     if(!newCatName.trim()) return;
     const updated = [...categories, newCatName.trim()];
     setCategories(updated); setNewCatName('');
-    if(user) await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences'), { categories: updated }).catch(()=>{});
+    if(user) await updateDoc(doc(db, 'users', user.uid, 'settings', 'preferences'), { categories: updated }).catch(()=>{});
   };
 
   const removeCategory = async (cat) => {
     if(!confirm(`Delete category "${cat}"?`)) return;
     const updated = categories.filter(c => c !== cat);
     setCategories(updated);
-    if(user) await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences'), { categories: updated }).catch(()=>{});
+    if(user) await updateDoc(doc(db, 'users', user.uid, 'settings', 'preferences'), { categories: updated }).catch(()=>{});
   };
 
   const addLocation = async () => {
     if(!newLocName.trim()) return;
     const updated = [...locations, newLocName.trim()];
     setLocations(updated); setNewLocName('');
-    if(user) await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences'), { locations: updated }).catch(()=>{});
+    if(user) await updateDoc(doc(db, 'users', user.uid, 'settings', 'preferences'), { locations: updated }).catch(()=>{});
   };
 
   const removeLocation = async (loc) => {
     if(!confirm(`Delete location "${loc}"?`)) return;
     const updated = locations.filter(l => l !== loc);
     setLocations(updated);
-    if(user) await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences'), { locations: updated }).catch(()=>{});
+    if(user) await updateDoc(doc(db, 'users', user.uid, 'settings', 'preferences'), { locations: updated }).catch(()=>{});
   };
   
   // Google Auth Helper
@@ -322,9 +322,9 @@ export default function HomeBarInventory() {
 
     try {
       if (editingId) {
-        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'inventory', editingId), payload);
+        await updateDoc(doc(db, 'users', user.uid, 'inventory', editingId), payload);
       } else {
-        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'inventory'), payload);
+        await addDoc(collection(db, 'users', user.uid, 'inventory'), payload);
       }
       setIsModalOpen(false);
     } catch (e) { console.error(e); }
@@ -334,7 +334,7 @@ export default function HomeBarInventory() {
   const updateQuantity = async (e, id, current, change) => {
     if(e) e.stopPropagation();
     if (current + change < 0) return;
-    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'inventory', id), { quantity: current + change });
+    await updateDoc(doc(db, 'users', user.uid, 'inventory', id), { quantity: current + change });
   };
 
   // --- Confirmation Helpers ---
@@ -351,7 +351,7 @@ export default function HomeBarInventory() {
   const executeConfirmation = async () => {
     if (!confirmation.id) return;
     try {
-      const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'inventory', confirmation.id);
+      const docRef = doc(db, user.uid, 'inventory', confirmation.id);
       
       if (confirmation.type === 'empty') {
         await updateDoc(docRef, { quantity: 0 });
