@@ -3,7 +3,7 @@ import {
   Plus, Search, Wine, Trash2, Minus, X, Loader2, Edit2, NotebookPen, 
   Sparkles, CheckCircle2, Circle, Settings, RefreshCw, AlertTriangle, 
   Package, Palette, Lightbulb, History, ChevronRight, Upload, Link as LinkIcon, ExternalLink,
-  Cloud, LogOut, User
+  Cloud, LogOut, User, Mail, Key
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { 
@@ -11,8 +11,8 @@ import {
   signInAnonymously, 
   onAuthStateChanged, 
   signInWithCustomToken,
-  GoogleAuthProvider,
-  signInWithPopup,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   signOut
 } from 'firebase/auth';
 import { 
@@ -29,7 +29,7 @@ import {
 } from 'firebase/firestore';
 
 // --- CONFIGURATION ---
-// Safely check if the environment variable exists to prevent ReferenceErrors
+// ⚠️ IMPORTANT: If deploying, replace the values below with your real Firebase config!
 const firebaseConfig = {
   apiKey: "AIzaSyABvOntgfWBn3XvJbasB7zKXkLIvHADJkc",
   authDomain: "homebar-95c2f.firebaseapp.com",
@@ -151,6 +151,13 @@ export default function HomeBarInventory() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
 
+  // Auth State
+  const [authMode, setAuthMode] = useState('menu'); // menu, login, signup
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPass, setAuthPass] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
+
   // Settings UI
   const [newCatName, setNewCatName] = useState('');
   const [newLocName, setNewLocName] = useState('');
@@ -225,6 +232,45 @@ export default function HomeBarInventory() {
     return () => { unsubInv(); unsubSettings(); };
   }, [user]);
 
+  // --- Auth Handlers (Email/Pass) ---
+  const handleEmailAuth = async (isSignup) => {
+    setAuthError('');
+    setIsAuthLoading(true);
+    try {
+      if (isSignup) {
+        await createUserWithEmailAndPassword(auth, authEmail, authPass);
+      } else {
+        await signInWithEmailAndPassword(auth, authEmail, authPass);
+      }
+      setIsSettingsOpen(false); // Close on success
+      setAuthMode('menu');
+      setAuthEmail('');
+      setAuthPass('');
+    } catch (error) {
+      console.error(error);
+      if (error.code === 'auth/invalid-api-key') {
+        setAuthError("Configuration Error: Invalid API Key. Please update HomeBarApp.jsx with your Firebase config.");
+      } else if (error.code === 'auth/email-already-in-use') {
+        setAuthError("Email already in use. Try signing in.");
+      } else if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password') {
+        setAuthError("Invalid email or password.");
+      } else {
+        setAuthError(error.message);
+      }
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      await signInAnonymously(auth); // Re-login as anonymous so app doesn't break
+    } catch (error) {
+      console.error("Logout failed", error);
+    }
+  };
+
   // --- Logic Helpers ---
   const saveTheme = async (t) => {
     setTheme(t);
@@ -239,7 +285,8 @@ export default function HomeBarInventory() {
   };
 
   const removeCategory = async (cat) => {
-    if(!confirm(`Delete category "${cat}"?`)) return;
+    // Note: We use window.confirm here for settings actions as it's simpler
+    if(!window.confirm(`Delete category "${cat}"?`)) return;
     const updated = categories.filter(c => c !== cat);
     setCategories(updated);
     if(user) await updateDoc(doc(db, 'users', user.uid, 'settings', 'preferences'), { categories: updated }).catch(()=>{});
@@ -253,31 +300,10 @@ export default function HomeBarInventory() {
   };
 
   const removeLocation = async (loc) => {
-    if(!confirm(`Delete location "${loc}"?`)) return;
+    if(!window.confirm(`Delete location "${loc}"?`)) return;
     const updated = locations.filter(l => l !== loc);
     setLocations(updated);
     if(user) await updateDoc(doc(db, 'users', user.uid, 'settings', 'preferences'), { locations: updated }).catch(()=>{});
-  };
-
-  // Google Auth Handlers
-  const handleGoogleLogin = async () => {
-    try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-      setIsSettingsOpen(false);
-    } catch (error) {
-      console.error("Login failed", error);
-      alert("Sign-in failed. This feature requires a deployed app and enabled Google Auth in Firebase Console.");
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      await signInAnonymously(auth); // Re-login as anonymous so app doesn't break
-    } catch (error) {
-      console.error("Logout failed", error);
-    }
   };
 
   // Form Logic
@@ -703,39 +729,70 @@ export default function HomeBarInventory() {
               {/* 0. Sync / Account (New) */}
               <div className="space-y-3">
                 <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider`}>Sync & Account</h3>
-                {user && user.isAnonymous ? (
-                  <button 
-                    onClick={handleGoogleLogin}
-                    className={`w-full p-3 rounded-xl border border-dashed ${theme.border} hover:border-indigo-500 hover:bg-indigo-500/10 transition-all flex items-center justify-between group ${theme.bgCard}`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-full bg-slate-800 group-hover:bg-slate-700 transition-colors`}>
-                        <Cloud size={18} className="text-indigo-400" />
+                {authMode === 'menu' ? (
+                  <>
+                  {user && !user.isAnonymous ? (
+                    <button 
+                      onClick={handleLogout}
+                      className={`w-full p-3 rounded-xl border ${theme.border} hover:border-red-500 hover:bg-red-500/10 transition-all flex items-center justify-between group ${theme.bgCard}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`p-2 rounded-full bg-slate-800 group-hover:bg-slate-700 transition-colors`}>
+                          <LogOut size={18} className="text-red-400" />
+                        </div>
+                        <div className="text-left">
+                          <p className={`font-bold ${theme.textMain} text-sm`}>Sign Out</p>
+                          <p className={`text-[10px] ${theme.textMuted}`}>{user.email}</p>
+                        </div>
                       </div>
-                      <div className="text-left">
-                        <p className={`font-bold ${theme.textMain} text-sm`}>Sign in to Sync</p>
-                        <p className={`text-[10px] ${theme.textMuted}`}>Save inventory to cloud</p>
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={() => setAuthMode('login')}
+                      className={`w-full p-3 rounded-xl border border-dashed ${theme.border} hover:border-indigo-500 hover:bg-indigo-500/10 transition-all flex items-center justify-between group ${theme.bgCard}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`p-2 rounded-full bg-slate-800 group-hover:bg-slate-700 transition-colors`}>
+                          <Cloud size={18} className="text-indigo-400" />
+                        </div>
+                        <div className="text-left">
+                          <p className={`font-bold ${theme.textMain} text-sm`}>Sign in to Sync</p>
+                          <p className={`text-[10px] ${theme.textMuted}`}>Save inventory to cloud</p>
+                        </div>
                       </div>
-                    </div>
-                    <div className={`${theme.textMuted} group-hover:text-white`}>
-                      →
-                    </div>
-                  </button>
+                      <div className={`${theme.textMuted} group-hover:text-white`}>
+                        →
+                      </div>
+                    </button>
+                  )}
+                  </>
                 ) : (
-                  <button 
-                    onClick={handleLogout}
-                    className={`w-full p-3 rounded-xl border ${theme.border} hover:border-red-500 hover:bg-red-500/10 transition-all flex items-center justify-between group ${theme.bgCard}`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-full bg-slate-800 group-hover:bg-slate-700 transition-colors`}>
-                        <LogOut size={18} className="text-red-400" />
-                      </div>
-                      <div className="text-left">
-                        <p className={`font-bold ${theme.textMain} text-sm`}>Sign Out</p>
-                        <p className={`text-[10px] ${theme.textMuted}`}>{user?.email || 'Logged In'}</p>
-                      </div>
+                  <div className={`p-4 rounded-xl border ${theme.border} ${theme.bgCard} space-y-3`}>
+                    <div className="flex justify-between items-center mb-2">
+                       <h4 className={`text-sm font-bold ${theme.textMain}`}>{authMode === 'login' ? 'Sign In' : 'Create Account'}</h4>
+                       <button onClick={()=>setAuthMode('menu')} className="text-xs text-slate-400 hover:text-white">Cancel</button>
                     </div>
-                  </button>
+                    {authError && <div className="text-xs text-red-400 bg-red-900/20 p-2 rounded border border-red-900/50">{authError}</div>}
+                    <div className="space-y-2">
+                       <div className="relative">
+                         <Mail size={14} className="absolute left-3 top-3 text-slate-500"/>
+                         <input type="email" placeholder="Email" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} className={`w-full ${theme.bgInput} border ${theme.border} rounded-lg pl-9 pr-3 py-2 text-sm text-white focus:outline-none focus:ring-1 ${theme.ring}`} />
+                       </div>
+                       <div className="relative">
+                         <Key size={14} className="absolute left-3 top-3 text-slate-500"/>
+                         <input type="password" placeholder="Password" value={authPass} onChange={e=>setAuthPass(e.target.value)} className={`w-full ${theme.bgInput} border ${theme.border} rounded-lg pl-9 pr-3 py-2 text-sm text-white focus:outline-none focus:ring-1 ${theme.ring}`} />
+                       </div>
+                    </div>
+                    <button onClick={() => handleEmailAuth(authMode === 'signup')} disabled={isAuthLoading || !authEmail || !authPass} className={`w-full py-2 rounded-lg font-bold text-sm text-white ${theme.accentBg} disabled:opacity-50 flex justify-center`}>
+                      {isAuthLoading ? <Loader2 size={16} className="animate-spin"/> : (authMode === 'login' ? 'Sign In' : 'Create Account')}
+                    </button>
+                    <div className="text-center text-[10px] text-slate-400 mt-2">
+                       {authMode === 'login' ? "Don't have an account? " : "Already have an account? "}
+                       <button onClick={()=>setAuthMode(authMode === 'login' ? 'signup' : 'login')} className={`${theme.accentText} hover:underline`}>
+                         {authMode === 'login' ? 'Sign Up' : 'Log In'}
+                       </button>
+                    </div>
+                  </div>
                 )}
               </div>
 
@@ -895,7 +952,7 @@ export default function HomeBarInventory() {
                 <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider`}>Profile</h3>
                 <div className={`${theme.bgInput} p-3 rounded-lg border ${theme.border}`}><p className={`text-[10px] ${theme.textMuted} uppercase font-bold mb-1`}>User ID</p><p className="text-xs text-slate-300 font-mono truncate">{user?.uid || 'Not signed in'}</p></div>
               </div>
-              <div className={`text-center pt-4 border-t border-white/5`}><p className={`text-xs ${theme.textMuted}`}>HomeBar v2.0.0</p></div>
+              <div className={`text-center pt-4 border-t border-white/5`}><p className={`text-xs ${theme.textMuted}`}>HomeBar v2.2.0</p></div>
             </div>
           </div>
         </div>
