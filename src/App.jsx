@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Plus, Search, Wine, Trash2, Minus, X, Loader2, Edit2, NotebookPen, 
   Sparkles, CheckCircle2, Circle, Settings, RefreshCw, AlertTriangle, 
-  Package, Palette, Lightbulb, History, ChevronRight, Upload, Link as LinkIcon, ExternalLink, LogOut, Cloud, User
+  Package, Palette, Lightbulb, History, ChevronRight, Upload, Link as LinkIcon, ExternalLink,
+  Cloud, LogOut, User
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { 
@@ -28,7 +29,6 @@ import {
 } from 'firebase/firestore';
 
 // --- CONFIGURATION ---
-// Handles both sandbox environment and standalone deployment
 const firebaseConfig = {
   apiKey: "AIzaSyABvOntgfWBn3XvJbasB7zKXkLIvHADJkc",
   authDomain: "homebar-95c2f.firebaseapp.com",
@@ -37,12 +37,6 @@ const firebaseConfig = {
   messagingSenderId: "947971869072",
   appId: "1:947971869072:web:a0648d987255f85f978b15"
 };
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
 // --- API Key for AI ---
 const apiKey = ""; // Injected at runtime
 
@@ -195,7 +189,7 @@ export default function HomeBarInventory() {
   useEffect(() => {
     if (!user) return;
     
-    // Inventory (Standard path: artifacts/{appId}/users/{uid}/inventory)
+    // Inventory
     const q = query(collection(db, 'users', user.uid, 'inventory'));
     const unsubInv = onSnapshot(q, (snapshot) => {
       const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -203,7 +197,7 @@ export default function HomeBarInventory() {
       setLoading(false);
     });
 
-    // Settings (Standard path: artifacts/{appId}/users/{uid}/settings)
+    // Settings
     const settingsRef = doc(db, 'users', user.uid, 'settings', 'preferences');
     const unsubSettings = onSnapshot(settingsRef, (docSnap) => {
       if (docSnap.exists()) {
@@ -257,27 +251,25 @@ export default function HomeBarInventory() {
     setLocations(updated);
     if(user) await updateDoc(doc(db, 'users', user.uid, 'settings', 'preferences'), { locations: updated }).catch(()=>{});
   };
-  
-  // Google Auth Helper
+
+  // Google Auth Handlers
   const handleGoogleLogin = async () => {
     try {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
-      // Auth state listener will handle the rest
       setIsSettingsOpen(false);
     } catch (error) {
       console.error("Login failed", error);
-      alert("Sign in failed. Note: Google Auth requires a deployed app, it may not work in this preview.");
+      alert("Sign-in failed. This feature requires a deployed app and enabled Google Auth in Firebase Console.");
     }
   };
 
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      // Re-trigger anonymous sign in after sign out
-      await signInAnonymously(auth);
+      await signInAnonymously(auth); // Re-login as anonymous so app doesn't break
     } catch (error) {
-      console.error("Logout error", error);
+      console.error("Logout failed", error);
     }
   };
 
@@ -351,7 +343,7 @@ export default function HomeBarInventory() {
   const executeConfirmation = async () => {
     if (!confirmation.id) return;
     try {
-      const docRef = doc(db, user.uid, 'inventory', confirmation.id);
+      const docRef = doc(db, 'users', user.uid, 'inventory', confirmation.id);
       
       if (confirmation.type === 'empty') {
         await updateDoc(docRef, { quantity: 0 });
@@ -546,7 +538,6 @@ export default function HomeBarInventory() {
           <div className="flex items-center gap-3">
              <div className="p-2 rounded-lg bg-gradient-to-tr from-gray-700 to-gray-600"><BottleIcon className="text-white" size={20} /></div>
              <div><h1 className="font-bold text-lg">HomeBar</h1><p className={`text-xs ${theme.textMuted}`}>Inventory System</p></div>
-             <button onClick={() => setIsSettingsOpen(true)} className={`ml-2 p-1.5 ${theme.textMuted} hover:text-white hover:bg-white/5 rounded-lg transition-colors`}><Settings size={18} /></button>
           </div>
           <div className="flex gap-2">
             <button 
@@ -556,6 +547,7 @@ export default function HomeBarInventory() {
             >
               <Sparkles size={20} className={selectionMode ? 'text-yellow-300' : ''} />
             </button>
+            <button onClick={() => setIsSettingsOpen(true)} className={`p-2 rounded-full ${theme.bgMain} ${theme.textMuted} hover:text-white border ${theme.border} transition-colors`}><Settings size={20} /></button>
             {!selectionMode && (
               <button onClick={openAddModal} className={`${theme.accentBg} ${theme.accentBgHover} text-white p-2 px-4 rounded-lg shadow-lg flex items-center gap-2 font-medium active:scale-95 transition-all`}>
                 <Plus size={20} /> <span className="hidden sm:inline">Add</span>
@@ -718,7 +710,9 @@ export default function HomeBarInventory() {
                         <p className={`text-[10px] ${theme.textMuted}`}>Save inventory to cloud</p>
                       </div>
                     </div>
-                    <div className={`${theme.textMuted} group-hover:text-white`}>→</div>
+                    <div className={`${theme.textMuted} group-hover:text-white`}>
+                      →
+                    </div>
                   </button>
                 ) : (
                   <button 
@@ -892,16 +886,9 @@ export default function HomeBarInventory() {
               {/* 5. Profile */}
               <div className="space-y-3">
                 <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider`}>Profile</h3>
-                <div className={`${theme.bgInput} p-3 rounded-lg border ${theme.border}`}>
-                  <p className={`text-[10px] ${theme.textMuted} uppercase font-bold mb-1`}>User ID</p>
-                  <p className="text-xs text-slate-300 font-mono truncate">{user?.uid || 'Not signed in'}</p>
-                  <div className="flex gap-2 mt-2">
-                    <div className="text-[10px] bg-green-900/30 text-green-400 px-2 py-0.5 rounded border border-green-800">Online</div>
-                    {user?.isAnonymous && <div className="text-[10px] bg-amber-900/30 text-amber-400 px-2 py-0.5 rounded border border-amber-800">Anonymous</div>}
-                  </div>
-                </div>
+                <div className={`${theme.bgInput} p-3 rounded-lg border ${theme.border}`}><p className={`text-[10px] ${theme.textMuted} uppercase font-bold mb-1`}>User ID</p><p className="text-xs text-slate-300 font-mono truncate">{user?.uid || 'Not signed in'}</p></div>
               </div>
-              <div className={`text-center pt-4 border-t border-white/5`}><p className={`text-xs ${theme.textMuted}`}>HomeBar v2.1.0</p></div>
+              <div className={`text-center pt-4 border-t border-white/5`}><p className={`text-xs ${theme.textMuted}`}>HomeBar v2.0.0</p></div>
             </div>
           </div>
         </div>
