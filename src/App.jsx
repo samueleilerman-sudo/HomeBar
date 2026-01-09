@@ -145,6 +145,7 @@ export default function HomeBarInventory() {
   const [theme, setTheme] = useState(THEMES.classic);
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
   const [locations, setLocations] = useState(DEFAULT_LOCATIONS);
+  const [barName, setBarName] = useState('HomeBar');
   
   const [activeCategory, setActiveCategory] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -219,12 +220,14 @@ export default function HomeBarInventory() {
         if (data.themeId && THEMES[data.themeId]) setTheme(THEMES[data.themeId]);
         if (data.categories) setCategories(data.categories);
         if (data.locations) setLocations(data.locations);
+        if (data.barName) setBarName(data.barName);
       } else {
         // Create defaults if not exist
         setDoc(settingsRef, {
           themeId: 'classic',
           categories: DEFAULT_CATEGORIES,
-          locations: DEFAULT_LOCATIONS
+          locations: DEFAULT_LOCATIONS,
+          barName: 'HomeBar'
         });
       }
     });
@@ -275,6 +278,10 @@ export default function HomeBarInventory() {
   const saveTheme = async (t) => {
     setTheme(t);
     if(user) await updateDoc(doc(db, 'users', user.uid, 'settings', 'preferences'), { themeId: t.id }).catch(()=>{});
+  };
+
+  const saveBarName = async () => {
+    if(user) await updateDoc(doc(db, 'users', user.uid, 'settings', 'preferences'), { barName }).catch(()=>{});
   };
 
   const addCategory = async () => {
@@ -570,7 +577,7 @@ export default function HomeBarInventory() {
         <div className="max-w-5xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-3">
              <div className="p-2 rounded-lg bg-gradient-to-tr from-gray-700 to-gray-600"><BottleIcon className="text-white" size={20} /></div>
-             <div><h1 className="font-bold text-lg">HomeBar</h1><p className={`text-xs ${theme.textMuted}`}>Inventory System</p></div>
+             <div><h1 className="font-bold text-lg">{barName}</h1><p className={`text-xs ${theme.textMuted}`}>Inventory System</p></div>
              <button onClick={() => setIsSettingsOpen(true)} className={`ml-2 p-1.5 ${theme.textMuted} hover:text-white hover:bg-white/5 rounded-lg transition-colors`}><Settings size={18} /></button>
           </div>
           <div className="flex gap-2">
@@ -726,7 +733,22 @@ export default function HomeBarInventory() {
             
             <div className="p-6 overflow-y-auto space-y-6">
 
-              {/* 0. Sync / Account (New) */}
+              {/* 0. Bar Name (New) */}
+              <div className="space-y-3">
+                <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider`}>Bar Name</h3>
+                <input 
+                  type="text" 
+                  value={barName} 
+                  onChange={(e) => setBarName(e.target.value)} 
+                  onBlur={() => saveBarName()}
+                  placeholder="My Home Bar"
+                  className={`w-full ${theme.bgInput} border ${theme.border} rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 ${theme.ring}`} 
+                />
+              </div>
+
+              <div className={`h-px ${theme.bgCard}`} />
+
+              {/* 1. Sync / Account (New) */}
               <div className="space-y-3">
                 <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider`}>Sync & Account</h3>
                 {authMode === 'menu' ? (
@@ -798,7 +820,7 @@ export default function HomeBarInventory() {
 
               <div className={`h-px ${theme.bgCard}`} />
 
-              {/* 1. Empty Bottles History */}
+              {/* 2. Empty Bottles History */}
               <div className="space-y-3">
                 <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider`}>History</h3>
                 
@@ -826,7 +848,7 @@ export default function HomeBarInventory() {
 
               <div className={`h-px ${theme.bgCard}`} />
 
-              {/* 2. Color Palette Selector (Compact) */}
+              {/* 3. Color Palette Selector (Compact) */}
               <div className="space-y-3">
                 <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider flex items-center gap-2`}>
                   <Palette size={14} /> Color Palette
@@ -854,7 +876,7 @@ export default function HomeBarInventory() {
 
               <div className={`h-px ${theme.bgCard}`} />
               
-              {/* 3. AI Bar Sommelier (Compact) */}
+              {/* 4. AI Bar Sommelier (Compact) */}
               <div className="space-y-3">
                 <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider flex items-center gap-2`}>
                   <Sparkles size={14} className="text-yellow-400" /> AI Bar Sommelier
@@ -912,7 +934,7 @@ export default function HomeBarInventory() {
 
               <div className={`h-px ${theme.bgCard}`} />
 
-              {/* 4. Lists Management (New) */}
+              {/* 5. Lists Management (New) */}
               <div className="space-y-4">
                 <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider flex items-center gap-2`}><Package size={14} /> Custom Categories</h3>
                 <div className="flex gap-2">
@@ -947,12 +969,12 @@ export default function HomeBarInventory() {
               
               <div className={`h-px ${theme.bgCard}`} />
 
-              {/* 5. Profile */}
+              {/* 6. Profile */}
               <div className="space-y-3">
                 <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider`}>Profile</h3>
                 <div className={`${theme.bgInput} p-3 rounded-lg border ${theme.border}`}><p className={`text-[10px] ${theme.textMuted} uppercase font-bold mb-1`}>User ID</p><p className="text-xs text-slate-300 font-mono truncate">{user?.uid || 'Not signed in'}</p></div>
               </div>
-              <div className={`text-center pt-4 border-t border-white/5`}><p className={`text-xs ${theme.textMuted}`}>HomeBar v2.2.0</p></div>
+              <div className={`text-center pt-4 border-t border-white/5`}><p className={`text-xs ${theme.textMuted}`}>HomeBar v2.3.0</p></div>
             </div>
           </div>
         </div>
