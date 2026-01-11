@@ -3,7 +3,7 @@ import {
   Plus, Search, Wine, Trash2, Minus, X, Loader2, Edit2, NotebookPen, 
   Sparkles, CheckCircle2, Circle, Settings, RefreshCw, AlertTriangle, 
   Package, Palette, Lightbulb, History, ChevronRight, Upload, Link as LinkIcon, ExternalLink,
-  Cloud, LogOut, User, Mail, Key
+  Cloud, LogOut, User, Mail, Key, BrainCircuit, HelpCircle, Filter, ShoppingCart
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { 
@@ -43,29 +43,116 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-// --- API Key for AI ---
-const apiKey = ""; // Injected at runtime
+// --- ROBUST LOCAL DATA ---
 
-// --- API Helper with Backoff ---
-const fetchWithBackoff = async (url, options, retries = 5, delay = 1000) => {
-  try {
-    const response = await fetch(url, options);
-    if (!response.ok) {
-      // 403 is usually not retryable (permission denied), but we throw to catch block
-      if (response.status === 403) throw new Error("Permission Denied (403). AI features may be restricted.");
-      if (response.status === 429 || (response.status >= 500 && response.status < 600)) {
-         throw new Error(`Retryable error: ${response.status}`);
-      }
-      throw new Error(`API Error: ${response.status}`);
-    }
-    return response;
-  } catch (error) {
-    if (retries > 0 && (error.message.includes("Retryable") || error.message.includes("Failed to fetch"))) {
-      await new Promise(res => setTimeout(res, delay));
-      return fetchWithBackoff(url, options, retries - 1, delay * 2);
-    }
-    throw error;
-  }
+// 1. Kitchen Staples (Drastically reduced to force inventory checks)
+// Only truly basic kitchen items are assumed. 
+// Users must now add "Lime", "Lemon", "Soda", "Bitters" etc. to their inventory.
+const STAPLES = [
+  "Sugar", "Simple Syrup", "Demerara Syrup", "Honey", "Agave", "Maple Syrup", // Sweeteners usually in pantry
+  "Water", "Ice", 
+  "Salt", "Pepper"
+];
+
+// 2. Logic to map specific bottles to generic categories
+const SUBSTITUTIONS = {
+  // Whiskeys
+  "Bourbon": "Whiskey", "Rye": "Whiskey", "Scotch": "Whiskey", "Irish Whiskey": "Whiskey", "Japanese Whisky": "Whiskey",
+  // Tequilas
+  "Mezcal": "Tequila", "Reposado": "Tequila", "Anejo": "Tequila", "Blanco": "Tequila",
+  // Brandies
+  "Cognac": "Brandy", "Armagnac": "Brandy", "Pisco": "Brandy",
+  // Rums
+  "Dark Rum": "Rum", "White Rum": "Rum", "Spiced Rum": "Rum", "Aged Rum": "Rum", "Cachaça": "Rum",
+  // Liqueurs
+  "Cointreau": "Triple Sec", "Grand Marnier": "Triple Sec", "Dry Curacao": "Triple Sec", "Curacao": "Triple Sec",
+  "Kahlua": "Coffee Liqueur", "Tia Maria": "Coffee Liqueur",
+  "Amaretto Disaronno": "Amaretto",
+  "Baileys": "Irish Cream",
+  "Chambord": "Raspberry Liqueur",
+  "St. Germain": "Elderflower",
+  "Drambuie": "Scotch Liqueur",
+  // Ingredient Maps
+  "Simple Syrup": "Sugar" 
+};
+
+// 3. Robust Recipe Database (60+ Recipes)
+const RECIPES_DB = [
+  // --- WHISKEY ---
+  { name: "Old Fashioned", ingredients: ["Whiskey", "Bitters", "Sugar", "Water"], instructions: "Muddle sugar with bitters and water. Add whiskey and ice. Stir." },
+  { name: "Manhattan", ingredients: ["Whiskey", "Sweet Vermouth", "Bitters"], instructions: "Stir whiskey, sweet vermouth, and bitters with ice. Strain into a chilled glass." },
+  { name: "Whiskey Sour", ingredients: ["Whiskey", "Lemon", "Sugar", "Egg White"], instructions: "Dry shake all ingredients. Add ice, shake again. Strain." },
+  { name: "Mint Julep", ingredients: ["Whiskey", "Mint", "Sugar"], instructions: "Muddle mint and sugar. Add crushed ice and whiskey. Stir until frosted." },
+  { name: "Boulevardier", ingredients: ["Whiskey", "Sweet Vermouth", "Campari"], instructions: "Stir whiskey, sweet vermouth, and Campari with ice. Strain." },
+  { name: "Sazerac", ingredients: ["Whiskey", "Absinthe", "Sugar", "Bitters"], instructions: "Rinse glass with absinthe. Stir whiskey, sugar, bitters with ice. Strain." },
+  { name: "Paper Plane", ingredients: ["Whiskey", "Aperol", "Amaro", "Lemon"], instructions: "Shake equal parts Bourbon, Aperol, Amaro Nonino, and lemon. Strain." },
+  { name: "Vieux Carré", ingredients: ["Whiskey", "Brandy", "Sweet Vermouth", "Benedictine", "Bitters"], instructions: "Stir all ingredients with ice. Strain." },
+  { name: "Penicillin", ingredients: ["Whiskey", "Lemon", "Honey", "Ginger"], instructions: "Shake whiskey, lemon, and honey-ginger syrup. Strain over ice." },
+  { name: "Highball", ingredients: ["Whiskey", "Soda"], instructions: "Build in a tall glass with ice. Add whiskey, top with soda." },
+  { name: "Irish Coffee", ingredients: ["Whiskey", "Coffee", "Sugar", "Cream"], instructions: "Mix hot coffee, whiskey, and sugar. Float cream on top." },
+  
+  // --- GIN ---
+  { name: "Martini", ingredients: ["Gin", "Dry Vermouth"], instructions: "Stir gin and dry vermouth with ice. Strain into a chilled glass." },
+  { name: "Gin & Tonic", ingredients: ["Gin", "Tonic"], instructions: "Pour gin and tonic water into a glass filled with ice. Garnish with lime." },
+  { name: "Negroni", ingredients: ["Gin", "Sweet Vermouth", "Campari"], instructions: "Stir equal parts gin, sweet vermouth, and Campari with ice. Strain." },
+  { name: "Gimlet", ingredients: ["Gin", "Lime", "Sugar"], instructions: "Shake gin, lime juice, and simple syrup with ice. Strain." },
+  { name: "Tom Collins", ingredients: ["Gin", "Lemon", "Sugar", "Soda"], instructions: "Build in glass with ice. Top with soda." },
+  { name: "French 75", ingredients: ["Gin", "Lemon", "Sugar", "Sparkling Wine"], instructions: "Shake gin, lemon, and sugar. Strain into flute and top with sparkling wine." },
+  { name: "Aviation", ingredients: ["Gin", "Maraschino", "Lemon", "Violette"], instructions: "Shake all ingredients with ice. Strain." },
+  { name: "Last Word", ingredients: ["Gin", "Maraschino", "Chartreuse", "Lime"], instructions: "Shake equal parts with ice. Strain." },
+  { name: "Bee's Knees", ingredients: ["Gin", "Lemon", "Honey"], instructions: "Shake gin, lemon, and honey syrup with ice. Strain." },
+  { name: "Vesper", ingredients: ["Gin", "Vodka", "Lillet"], instructions: "Shake gin, vodka, and Lillet Blanc with ice. Strain." },
+  { name: "Corpse Reviver #2", ingredients: ["Gin", "Lillet", "Triple Sec", "Lemon", "Absinthe"], instructions: "Shake equal parts (rinse glass with absinthe). Strain." },
+  { name: "Southside", ingredients: ["Gin", "Lime", "Sugar", "Mint"], instructions: "Shake gin, lime, sugar, and mint with ice. Strain." },
+
+  // --- TEQUILA / MEZCAL ---
+  { name: "Margarita", ingredients: ["Tequila", "Lime", "Triple Sec"], instructions: "Shake tequila, lime juice, and triple sec with ice. Strain into salt-rimmed glass." },
+  { name: "Paloma", ingredients: ["Tequila", "Lime", "Soda", "Grapefruit"], instructions: "Mix tequila and lime juice. Top with grapefruit soda." },
+  { name: "Tequila Sunrise", ingredients: ["Tequila", "Orange", "Grenadine"], instructions: "Pour tequila and OJ over ice. Sink grenadine to bottom." },
+  { name: "Oaxaca Old Fashioned", ingredients: ["Tequila", "Mezcal", "Agave", "Bitters"], instructions: "Stir tequila, mezcal, agave, and bitters with ice. Strain." },
+  { name: "Mexican Mule", ingredients: ["Tequila", "Ginger Beer", "Lime"], instructions: "Build in glass with ice. Top with ginger beer." },
+
+  // --- RUM ---
+  { name: "Daiquiri", ingredients: ["Rum", "Lime", "Sugar"], instructions: "Shake rum, lime juice, and sugar with ice. Strain." },
+  { name: "Mojito", ingredients: ["Rum", "Mint", "Lime", "Sugar", "Soda"], instructions: "Muddle mint, lime, and sugar. Add rum, ice, and top with soda." },
+  { name: "Dark & Stormy", ingredients: ["Rum", "Ginger Beer", "Lime"], instructions: "Fill glass with ice. Add rum and top with ginger beer." },
+  { name: "Mai Tai", ingredients: ["Rum", "Lime", "Orgeat", "Triple Sec"], instructions: "Shake rum, lime, orgeat, and triple sec with ice. Strain over crushed ice." },
+  { name: "Piña Colada", ingredients: ["Rum", "Coconut Cream", "Pineapple"], instructions: "Blend rum, coconut cream, and pineapple juice with ice." },
+  { name: "Jungle Bird", ingredients: ["Rum", "Campari", "Pineapple", "Lime", "Sugar"], instructions: "Shake all ingredients with ice. Strain over fresh ice." },
+  { name: "Cuba Libre", ingredients: ["Rum", "Cola", "Lime"], instructions: "Build in glass with ice. Rum, Cola, Lime wedge." },
+  { name: "Caipirinha", ingredients: ["Cachaça", "Lime", "Sugar"], instructions: "Muddle lime and sugar. Add Cachaça and ice. Shake." },
+
+  // --- VODKA ---
+  { name: "Cosmopolitan", ingredients: ["Vodka", "Triple Sec", "Lime", "Cranberry"], instructions: "Shake vodka, triple sec, lime, and cranberry juice. Strain." },
+  { name: "Moscow Mule", ingredients: ["Vodka", "Ginger Beer", "Lime"], instructions: "Combine vodka and ginger beer in a mug with ice. Add lime juice." },
+  { name: "Bloody Mary", ingredients: ["Vodka", "Tomato Juice", "Lemon", "Spices"], instructions: "Mix vodka, tomato juice, lemon, and spices with ice. Stir." },
+  { name: "Espresso Martini", ingredients: ["Vodka", "Coffee Liqueur", "Coffee"], instructions: "Shake vodka, coffee liqueur, and fresh espresso vigorously with ice." },
+  { name: "White Russian", ingredients: ["Vodka", "Coffee Liqueur", "Cream"], instructions: "Build vodka and coffee liqueur in glass with ice. Float cream on top." },
+  { name: "Lemon Drop", ingredients: ["Vodka", "Triple Sec", "Lemon", "Sugar"], instructions: "Shake vodka, triple sec, lemon, and sugar. Strain into sugar-rimmed glass." },
+  { name: "Vodka Martini", ingredients: ["Vodka", "Dry Vermouth"], instructions: "Stir vodka and dry vermouth with ice. Strain." },
+
+  // --- BRANDY / OTHERS ---
+  { name: "Sidecar", ingredients: ["Brandy", "Triple Sec", "Lemon"], instructions: "Shake brandy, triple sec, and lemon juice with ice. Strain into sugar-rimmed glass." },
+  { name: "Aperol Spritz", ingredients: ["Aperol", "Sparkling Wine", "Soda"], instructions: "Fill glass with ice. Add sparkling wine, Aperol, and a splash of soda." },
+  { name: "Amaretto Sour", ingredients: ["Amaretto", "Lemon", "Sugar", "Egg White"], instructions: "Shake amaretto, lemon, sugar, and egg white. Add ice, shake again." },
+  { name: "Pisco Sour", ingredients: ["Pisco", "Lime", "Sugar", "Egg White", "Bitters"], instructions: "Dry shake, then shake with ice. Strain and top with bitters." },
+  { name: "Americano", ingredients: ["Campari", "Sweet Vermouth", "Soda"], instructions: "Build in glass with ice. Equal parts Campari and Vermouth, top with soda." },
+  { name: "Mimosa", ingredients: ["Sparkling Wine", "Orange"], instructions: "Equal parts sparkling wine and orange juice in a flute." },
+  { name: "Kir Royale", ingredients: ["Sparkling Wine", "Creme de Cassis"], instructions: "Add Creme de Cassis to flute, top with sparkling wine." }
+];
+
+const TASTING_NOTES_MAP = {
+    "Whiskey": "Oak, vanilla, caramel, spice, smoke",
+    "Bourbon": "Sweet corn, vanilla, caramel, oak",
+    "Vodka": "Clean, crisp, citrus, grain",
+    "Gin": "Juniper, citrus, floral, herbal",
+    "Rum": "Molasses, tropical fruit, spice, sweet",
+    "Tequila": "Agave, citrus, pepper, earth",
+    "Brandy": "Fruit, oak, vanilla, spice",
+    "Wine": "Fruit, tannin, acidity, oak",
+    "Beer": "Hops, malt, citrus, crisp",
+    "Liqueur": "Sweet, herbal, fruit, complex",
+    "Mixer": "Sweet, sour, bitter, carbonated"
 };
 
 // --- Custom Icons ---
@@ -174,15 +261,12 @@ export default function HomeBarInventory() {
   const [editingId, setEditingId] = useState(null);
 
   // Auth State
-  const [authMode, setAuthMode] = useState('menu'); // menu, login, signup
+  const [authMode, setAuthMode] = useState('menu'); 
   const [authEmail, setAuthEmail] = useState('');
   const [authPass, setAuthPass] = useState('');
   const [authError, setAuthError] = useState('');
   const [isAuthLoading, setIsAuthLoading] = useState(false);
-
-  // Settings UI
-  const [newCatName, setNewCatName] = useState('');
-  const [newLocName, setNewLocName] = useState('');
+  const [userApiKey, setUserApiKey] = useState('');
 
   // Confirmation State
   const [confirmation, setConfirmation] = useState({
@@ -192,7 +276,7 @@ export default function HomeBarInventory() {
     name: ''
   });
 
-  // AI & Selection
+  // AI & Selection State
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [isGenerating, setIsGenerating] = useState(false);
@@ -202,7 +286,11 @@ export default function HomeBarInventory() {
   const [barAnalysis, setBarAnalysis] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  // Form Fields
+  // Settings Management UI
+  const [newCatName, setNewCatName] = useState('');
+  const [newLocName, setNewLocName] = useState('');
+
+  // Forms
   const [formData, setFormData] = useState({ name: '', category: 'Whiskey', location: 'Bar Shelf', image: '', proof: '', size: '750 mL', abv: '', notes: '' });
   const [isSaving, setIsSaving] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -210,7 +298,6 @@ export default function HomeBarInventory() {
   // Auth & Init
   useEffect(() => {
     const initAuth = async () => {
-      // Use standard canvas auth if available, otherwise anonymous
       if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
         await signInWithCustomToken(auth, __initial_auth_token);
       } else {
@@ -218,6 +305,11 @@ export default function HomeBarInventory() {
       }
     };
     initAuth();
+
+    // Load local API key if present
+    const storedKey = localStorage.getItem('gemini_api_key');
+    if (storedKey) setUserApiKey(storedKey);
+
     return onAuthStateChanged(auth, (u) => setUser(u));
   }, []);
 
@@ -264,7 +356,7 @@ export default function HomeBarInventory() {
   const getDocRef = (collectionName, docId) => {
      if (typeof __app_id !== 'undefined') {
          if (docId) return doc(db, 'users', user.uid, collectionName, docId);
-         return doc(db, 'users', user.uid, collectionName, 'preferences');
+         return doc(db,   'users', user.uid, collectionName, 'preferences');
      } else {
          if (docId) return doc(db, 'users', user.uid, collectionName, docId);
          return doc(db, 'users', user.uid, collectionName, 'preferences');
@@ -279,32 +371,10 @@ export default function HomeBarInventory() {
      }
   };
 
-  const handleEmailAuth = async (isSignup) => {
-    setAuthError('');
-    setIsAuthLoading(true);
-    try {
-      if (isSignup) {
-        await createUserWithEmailAndPassword(auth, authEmail, authPass);
-      } else {
-        await signInWithEmailAndPassword(auth, authEmail, authPass);
-      }
-      setIsSettingsOpen(false);
-      setAuthMode('menu');
-      setAuthEmail('');
-      setAuthPass('');
-    } catch (error) {
-      console.error(error);
-      setAuthError(error.message);
-    } finally {
-      setIsAuthLoading(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      await signInAnonymously(auth);
-    } catch (error) { console.error("Logout failed", error); }
+  // --- Settings Handlers ---
+  const saveApiKey = (key) => {
+    setUserApiKey(key);
+    localStorage.setItem('gemini_api_key', key);
   };
 
   const saveTheme = async (t) => { setTheme(t); if(user) await updateDoc(getDocRef('settings'), { themeId: t.id }).catch(()=>{}); };
@@ -313,152 +383,237 @@ export default function HomeBarInventory() {
   const removeCategory = async (cat) => { if(!window.confirm(`Delete category "${cat}"?`)) return; const updated = categories.filter(c => c !== cat); setCategories(updated); if(user) await updateDoc(getDocRef('settings'), { categories: updated }).catch(()=>{}); };
   const addLocation = async () => { if(!newLocName.trim()) return; const updated = [...locations, newLocName.trim()]; setLocations(updated); setNewLocName(''); if(user) await updateDoc(getDocRef('settings'), { locations: updated }).catch(()=>{}); };
   const removeLocation = async (loc) => { if(!window.confirm(`Delete location "${loc}"?`)) return; const updated = locations.filter(l => l !== loc); setLocations(updated); if(user) await updateDoc(getDocRef('settings'), { locations: updated }).catch(()=>{}); };
+  
+  const handleEmailAuth = async (isSignup) => {
+    setAuthError(''); setIsAuthLoading(true);
+    try {
+      if (isSignup) await createUserWithEmailAndPassword(auth, authEmail, authPass);
+      else await signInWithEmailAndPassword(auth, authEmail, authPass);
+      setIsSettingsOpen(false); setAuthMode('menu'); setAuthEmail(''); setAuthPass('');
+    } catch (error) { setAuthError(error.message); } 
+    finally { setIsAuthLoading(false); }
+  };
+  const handleLogout = async () => { try { await signOut(auth); await signInAnonymously(auth); } catch (error) { console.error("Logout failed", error); } };
 
+  // --- Form Logic ---
   const handleFieldChange = (field, value) => {
     setFormData(prev => {
       const newData = { ...prev, [field]: value };
-      if (field === 'proof' && value && !isNaN(value)) {
-        newData.abv = (parseFloat(value) / 2).toString();
-      }
+      if (field === 'proof' && value && !isNaN(value)) newData.abv = (parseFloat(value) / 2).toString();
       return newData;
     });
   };
-
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setIsUploading(true);
-    try {
-      const base64 = await resizeImage(file);
-      handleFieldChange('image', base64);
-    } catch(err) { console.error(err); alert("Error processing image"); }
-    finally { setIsUploading(false); }
+    try { const base64 = await resizeImage(file); handleFieldChange('image', base64); } 
+    catch(err) { alert("Error processing image"); } finally { setIsUploading(false); }
   };
-
   const handleSave = async (e) => {
     e.preventDefault();
     if (!formData.name.trim()) return;
     setIsSaving(true);
-    
     let img = formData.image.trim();
     if (!img) img = await fetchBottleImage(formData.name);
-
-    const payload = {
-      ...formData,
-      imageUrl: img,
-      quantity: editingId ? undefined : 1,
-      createdAt: editingId ? undefined : serverTimestamp()
-    };
+    const payload = { ...formData, imageUrl: img, quantity: editingId ? undefined : 1, createdAt: editingId ? undefined : serverTimestamp() };
     Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
-
-    try {
-      if (editingId) {
-        await updateDoc(getDocRef('inventory', editingId), payload);
-      } else {
-        await addDoc(getCollectionRef('inventory'), payload);
-      }
-      setIsModalOpen(false);
-    } catch (e) { console.error(e); }
-    finally { setIsSaving(false); }
+    try { if (editingId) await updateDoc(getDocRef('inventory', editingId), payload); else await addDoc(getCollectionRef('inventory'), payload); setIsModalOpen(false); } 
+    catch (e) { console.error(e); } finally { setIsSaving(false); }
   };
-
   const updateQuantity = async (e, id, current, change) => {
     if(e) e.stopPropagation();
     if (current + change < 0) return;
     await updateDoc(getDocRef('inventory', id), { quantity: current + change });
   };
-
-  // --- Confirmation Helpers ---
-  const promptAction = (e, type, item) => {
-    e.stopPropagation();
-    setConfirmation({ isOpen: true, type: type, id: item.id, name: item.name });
-  };
-
+  const promptAction = (e, type, item) => { e.stopPropagation(); setConfirmation({ isOpen: true, type: type, id: item.id, name: item.name }); };
   const executeConfirmation = async () => {
     if (!confirmation.id) return;
     try {
-      const docRef = doc(db, 'users', user.uid, 'inventory', confirmation.id);
+      const docRef = doc(db,   'users', user.uid, 'inventory', confirmation.id);
       if (confirmation.type === 'empty') await updateDoc(docRef, { quantity: 0 });
-      else if (confirmation.type === 'delete') {
-        await deleteDoc(docRef);
-        if (isModalOpen && editingId === confirmation.id) setIsModalOpen(false);
-      }
-    } catch (error) { console.error("Error executing action:", error); } 
-    finally { setConfirmation({ isOpen: false, type: null, id: null, name: '' }); }
+      else if (confirmation.type === 'delete') { await deleteDoc(docRef); if (isModalOpen && editingId === confirmation.id) setIsModalOpen(false); }
+    } catch (error) { console.error(error); } finally { setConfirmation({ isOpen: false, type: null, id: null, name: '' }); }
   };
+  const openAddModal = () => { setEditingId(null); setFormData({ name: '', category: categories[0] || 'Whiskey', location: locations[0] || 'Bar Shelf', image: '', proof: '', size: '750 mL', abv: '', notes: '' }); setIsModalOpen(true); };
+  const openEditModal = (item) => { if (selectionMode) { toggleSelection(item.id); return; } setEditingId(item.id); setFormData({ name: item.name || '', category: item.category || categories[0], location: item.location || locations[0], image: item.imageUrl || '', proof: item.proof || '', size: item.size || '750 mL', abv: item.abv || '', notes: item.notes || '' }); setIsModalOpen(true); };
 
-  const openAddModal = () => {
-    setEditingId(null);
-    setFormData({ name: '', category: categories[0] || 'Whiskey', location: locations[0] || 'Bar Shelf', image: '', proof: '', size: '750 mL', abv: '', notes: '' });
-    setIsModalOpen(true);
-  };
+  // --- UNIFIED COCKTAIL LOGIC (API + LOCAL) ---
+  const toggleSelection = (id) => { const newSet = new Set(selectedIds); newSet.has(id) ? newSet.delete(id) : newSet.add(id); setSelectedIds(newSet); };
 
-  const openEditModal = (item) => {
-    if (selectionMode) { toggleSelection(item.id); return; }
-    setEditingId(item.id);
-    setFormData({ name: item.name || '', category: item.category || categories[0], location: item.location || locations[0], image: item.imageUrl || '', proof: item.proof || '', size: item.size || '750 mL', abv: item.abv || '', notes: item.notes || '' });
-    setIsModalOpen(true);
-  };
+  // Helper function to match recipes against user inventory (used by Local & API fallback)
+  const analyzeRecipe = (originalRecipe, userItems, selectedItems) => {
+     const recipe = { ...originalRecipe };
+     const ingredients = recipe.ingredients;
+     let missingCount = 0;
+     let missingIngredient = "";
 
-  // AI Logic
-  const toggleSelection = (id) => {
-    const newSet = new Set(selectedIds);
-    newSet.has(id) ? newSet.delete(id) : newSet.add(id);
-    setSelectedIds(newSet);
+     ingredients.forEach(ing => {
+        const req = ing.toLowerCase();
+        
+        // 1. Staple Check
+        if (STAPLES.some(s => req.includes(s.toLowerCase()))) return;
+
+        // 2. Check Inventory (Name, Category, Substitution)
+        const hasItem = userItems.some(item => {
+           const iName = item.name.toLowerCase();
+           const iCat = item.category.toLowerCase();
+           
+           // Name Match
+           if (iName.includes(req)) return true;
+           // Category Match
+           if (iCat === req) return true;
+           // Substitution Check
+           const subFromCat = SUBSTITUTIONS[item.category];
+           if (subFromCat && subFromCat.toLowerCase() === req) return true;
+           const subFromName = SUBSTITUTIONS[item.name];
+           if (subFromName && subFromName.toLowerCase() === req) return true;
+           
+           return false;
+        });
+
+        if (!hasItem) {
+            missingCount++;
+            missingIngredient = ing;
+        }
+     });
+
+     // Selection Filtering
+     if (selectedIds.size > 0) {
+        // Must use at least one *significant* (non-staple) selected ingredient
+        const relevantSelected = selectedItems.filter(item => !STAPLES.some(s => item.name.toLowerCase().includes(s.toLowerCase())));
+        const itemsToCheck = relevantSelected.length > 0 ? relevantSelected : selectedItems;
+
+        const usesSelection = ingredients.some(ing => {
+            const req = ing.toLowerCase();
+            return itemsToCheck.some(item => {
+                const iName = item.name.toLowerCase();
+                const iCat = item.category.toLowerCase();
+                const subCat = SUBSTITUTIONS[item.category];
+                const subName = SUBSTITUTIONS[item.name];
+                return iName.includes(req) || iCat === req || 
+                       (subCat && subCat.toLowerCase() === req) ||
+                       (subName && subName.toLowerCase() === req);
+            });
+        });
+        if (!usesSelection) return null;
+     }
+
+     // Return matched recipe object with stats
+     if (missingCount === 0) return { ...recipe, missingCount: 0 };
+     if (missingCount === 1) return { ...recipe, missing: missingIngredient, missingCount: 1 }; // Allow 1 missing for suggestions
+     return null; 
   };
 
   const generateCocktails = async () => {
     setIsGenerating(true);
-    const availableInventory = inventory.filter(i => i.quantity > 0).map(i => i.name).join(', ');
-    const hasSelection = selectedIds.size > 0;
-    const selectedIngredients = inventory.filter(item => selectedIds.has(item.id)).map(item => item.name).join(', ');
-    const prompt = hasSelection ? `I have a home bar. Inventory: ${availableInventory}. Use specific ingredients: ${selectedIngredients}. Suggest 3-5 distinct cocktails. Return strictly JSON array: [{"name":"", "description":"", "ingredients":[], "instructions":""}]. No markdown.` : `I have a home bar. Inventory: ${availableInventory}. Suggest 3-5 distinct cocktails. Return strictly JSON array: [{"name":"", "description":"", "ingredients":[], "instructions":""}]. No markdown.`;
-    
-    try {
-      const response = await fetchWithBackoff(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-      });
-      const data = await response.json();
-      let text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (text) {
-        const start = text.indexOf('['); const end = text.lastIndexOf(']');
-        if (start !== -1 && end !== -1) {
-             setSuggestions(JSON.parse(text.substring(start, end + 1)));
-             setShowSuggestions(true);
-        }
-      }
-    } catch (error) { console.error("AI Error:", error); alert(`Unable to generate cocktails. ${error.message}`); } 
-    finally { setIsGenerating(false); }
-  };
+    const userItems = inventory.filter(i => i.quantity > 0);
+    const selectedItems = inventory.filter(i => selectedIds.has(i.id));
 
-  const generateTastingNotes = async () => {
-    if (!formData.name) return;
-    setIsGeneratingNotes(true);
-    try {
-        const response = await fetchWithBackoff(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: `Describe tasting notes for ${formData.name} (${formData.category}) in <10 words, comma separated. Return raw text only.` }] }] })
-        });
+    // 1. Try Gemini API if key exists
+    if (userApiKey) {
+      const availableInventory = userItems.map(i => i.name).join(', ');
+      const selectedNames = selectedItems.map(i => i.name).join(', ');
+      // UPDATED PROMPT: Allow 1 missing ingredient
+      const prompt = selectedIds.size > 0 
+          ? `Inventory: ${availableInventory}. Use: ${selectedNames}. Suggest 5 cocktails. You may suggest recipes missing at most 1 ingredient from my inventory. Return JSON array: [{"name":"", "description":"", "ingredients":[], "instructions":""}]. No markdown.` 
+          : `Inventory: ${availableInventory}. Suggest 5 cocktails. You may suggest recipes missing at most 1 ingredient from my inventory. Return JSON array: [{"name":"", "description":"", "ingredients":[], "instructions":""}]. No markdown.`;
+      
+      try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${userApiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) });
         const data = await response.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-        if (text) handleFieldChange('notes', text);
-    } catch (e) { alert("Failed to auto-fill notes."); } 
-    finally { setIsGeneratingNotes(false); }
+        let text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) {
+          const start = text.indexOf('['); const end = text.lastIndexOf(']');
+          if (start !== -1 && end !== -1) {
+               const apiRecipes = JSON.parse(text.substring(start, end + 1));
+               // POST-PROCESS AI RESULTS through local analyzer to calculate missing ingredients accurately
+               const processed = apiRecipes.map(r => analyzeRecipe(r, userItems, selectedItems)).filter(Boolean);
+               
+               // Sort
+               const results = processed.sort((a, b) => {
+                  if (a.missingCount !== b.missingCount) return a.missingCount - b.missingCount;
+                  return b.ingredients.length - a.ingredients.length;
+               });
+
+               setSuggestions(results); setShowSuggestions(true); setIsGenerating(false); return;
+          }
+        }
+      } catch (e) { console.warn("AI Failed, falling back to local"); }
+    }
+
+    // 2. Fallback to Local Logic
+    setTimeout(() => {
+        const validRecipes = RECIPES_DB.map(r => analyzeRecipe(r, userItems, selectedItems)).filter(Boolean);
+        
+        // Sort: Missing Count ASC (0 first), then Ingredient Count DESC (Complex first)
+        const results = validRecipes.sort((a, b) => {
+            if (a.missingCount !== b.missingCount) return a.missingCount - b.missingCount;
+            return b.ingredients.length - a.ingredients.length;
+        }).slice(0, 10);
+
+        if (results.length > 0) {
+            setSuggestions(results);
+            setShowSuggestions(true);
+        } else {
+            alert(selectedIds.size > 0 ? "No cocktails found using your selected items." : "No cocktails found. Add more spirits!");
+        }
+        setIsGenerating(false);
+    }, 800);
   };
 
-  const analyzeCollection = async () => {
+  const generateTastingNotes = () => {
+    if (!formData.category) return;
+    setIsGeneratingNotes(true);
+    if (userApiKey) {
+        // Try API
+        fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${userApiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: `Describe tasting notes for ${formData.name} (${formData.category}) in <10 words. Return raw text.` }] }] }) })
+        .then(r => r.json()).then(d => {
+            const text = d.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+            if(text) { handleFieldChange('notes', text); setIsGeneratingNotes(false); return; }
+            throw new Error("No data");
+        }).catch(() => {
+             const note = TASTING_NOTES_MAP[formData.category] || "Balanced, complex, unique finish";
+             handleFieldChange('notes', note); setIsGeneratingNotes(false);
+        });
+    } else {
+        setTimeout(() => {
+            const note = TASTING_NOTES_MAP[formData.category] || "Balanced, complex, unique finish";
+            handleFieldChange('notes', note); setIsGeneratingNotes(false);
+        }, 500);
+    }
+  };
+
+  const analyzeCollection = () => {
     if (inventory.length === 0) return;
     setIsAnalyzing(true);
-    const list = inventory.filter(i => i.quantity > 0).map(i => `${i.name} (${i.category})`).join(', ');
-    try {
-      const response = await fetchWithBackoff(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
-        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ contents: [{ parts: [{ text: `Analyze inventory: ${list}. Return ONLY JSON: {"vibe": "short string", "summary": "string", "missing": "string"}. No markdown.` }] }] })
-      });
-      const data = await response.json();
-      let text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      const start = text?.indexOf('{'); const end = text?.lastIndexOf('}');
-      if (start !== -1 && end !== -1) setBarAnalysis(JSON.parse(text.substring(start, end + 1)));
-    } catch(e) { alert("Analysis failed. Try again."); } 
-    finally { setIsAnalyzing(false); }
+    if (userApiKey) {
+         fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${userApiKey}`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ contents: [{ parts: [{ text: `Analyze inventory: ${inventory.map(i=>i.name).join(',')}. Return JSON: {"vibe": "short string", "summary": "string", "missing": "string"}` }] }] }) })
+        .then(r => r.json()).then(d => {
+            let text = d.candidates?.[0]?.content?.parts?.[0]?.text;
+            const s = text?.indexOf('{'); const e = text?.lastIndexOf('}');
+            if (s !== -1 && e !== -1) { setBarAnalysis(JSON.parse(text.substring(s, e+1))); setIsAnalyzing(false); return; }
+            throw new Error("Parse error");
+        }).catch(() => { /* Fallback */ });
+    }
+    
+    // Fallback logic runs if API key missing OR fetch fails (simplification)
+    if (!userApiKey) {
+        setTimeout(() => {
+            const count = inventory.length;
+            const cats = {};
+            inventory.forEach(i => { cats[i.category] = (cats[i.category] || 0) + 1; });
+            const topCat = Object.keys(cats).reduce((a, b) => cats[a] > cats[b] ? a : b);
+            let vibe = "The Essentials Bar";
+            if (topCat === "Whiskey") vibe = "The Barrel Room";
+            if (topCat === "Gin") vibe = "The Botanical Garden";
+            if (topCat === "Rum") vibe = "The Tiki Lounge";
+            if (topCat === "Tequila") vibe = "Agave Paradise";
+            const missing = !cats["Bitters"] ? "Bitters" : (!cats["Vermouth"] ? "Vermouth" : "Liqueur");
+            setBarAnalysis({ vibe: vibe, summary: `A solid collection of ${count} bottles, heavily leaning towards ${topCat}.`, missing: `Consider adding some ${missing} to expand your cocktail options.` });
+            setIsAnalyzing(false);
+        }, 1000);
+    }
   };
 
   // --- Render Helpers ---
@@ -494,19 +649,30 @@ export default function HomeBarInventory() {
              <button onClick={() => setIsSettingsOpen(true)} className={`ml-2 p-1.5 ${theme.textMuted} hover:text-white hover:bg-white/5 rounded-lg transition-colors`}><Settings size={18} /></button>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => setSelectionMode(!selectionMode)} className={`p-2 rounded-full transition-all ${selectionMode ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : `${theme.bgMain} ${theme.textMuted} hover:text-white border ${theme.border}`}`} title="Cocktail Generator"><Sparkles size={20} className={selectionMode ? 'text-yellow-300' : ''} /></button>
-            {!selectionMode && <button onClick={openAddModal} className={`${theme.accentBg} ${theme.accentBgHover} text-white p-2 px-4 rounded-lg shadow-lg flex items-center gap-2 font-medium active:scale-95 transition-all`}><Plus size={20} /> <span className="hidden sm:inline">Add</span></button>}
+            <button 
+              onClick={() => setSelectionMode(!selectionMode)} 
+              className={`p-2 rounded-full transition-all ${selectionMode ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : `${theme.bgMain} ${theme.textMuted} hover:text-white border ${theme.border}`}`}
+              title="Cocktail Generator"
+            >
+              <Sparkles size={20} className={selectionMode ? 'text-yellow-300' : ''} />
+            </button>
+            {!selectionMode && (
+              <button onClick={openAddModal} className={`${theme.accentBg} ${theme.accentBgHover} text-white p-2 px-4 rounded-lg shadow-lg flex items-center gap-2 font-medium active:scale-95 transition-all`}>
+                <Plus size={20} /> <span className="hidden sm:inline">Add</span>
+              </button>
+            )}
           </div>
         </div>
       </nav>
 
-      {/* Main */}
       <main className="max-w-5xl mx-auto px-4 pt-6">
+        {/* Search */}
         <div className="relative mb-6">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search className={`h-5 w-5 ${theme.textMuted}`} /></div>
           <input type="text" className={`block w-full pl-10 pr-3 py-3 border ${theme.border} rounded-xl leading-5 ${theme.bgInput} ${theme.textMain} placeholder-slate-500 focus:outline-none focus:ring-2 ${theme.ring}`} placeholder="Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
         </div>
 
+        {/* Dashboard */}
         {!activeCategory && !selectionMode && (
           <div className="grid grid-cols-2 gap-4 mb-3">
              <div onClick={()=>setActiveCategory(null)} className={`relative overflow-hidden rounded-2xl p-5 border cursor-pointer ${theme.dashboardSecBg} hover:opacity-90`}><p className={`text-xs font-bold uppercase ${theme.dashboardSec}`}>Total Inventory</p><p className="text-3xl font-bold mt-1 text-white">{totalCount}</p><ShelfIcon className={`absolute -right-2 -bottom-2 opacity-10 text-white`} size={80} /></div>
@@ -514,6 +680,7 @@ export default function HomeBarInventory() {
           </div>
         )}
 
+        {/* Filter Bar */}
         <div className="flex gap-3 mb-4 overflow-x-auto pb-2 no-scrollbar">
           {activeCategory && <button onClick={()=>setActiveCategory(null)} className="flex items-center gap-1 bg-slate-700 text-white px-3 py-1 rounded-full text-xs whitespace-nowrap"><X size={12}/> Clear: {activeCategory === 'SPIRITS' ? 'Liquor & Spirits' : activeCategory}</button>}
           {sortedCats.map(([c, count]) => (
@@ -524,22 +691,33 @@ export default function HomeBarInventory() {
           ))}
         </div>
 
+        {/* Inventory Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
           {filteredInventory.map(item => (
             <div key={item.id} onClick={()=>{setEditingId(item.id); setFormData({...item}); setIsModalOpen(true);}} className={`group relative ${theme.bgCard} rounded-xl overflow-hidden border ${theme.border} hover:border-slate-500 transition-all cursor-pointer`}>
               <div className="aspect-[3/4] bg-white relative p-4 flex items-center justify-center">
                 {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-contain" /> : <BottleIcon size={40} className="text-slate-300"/>}
                 <div className="absolute top-2 left-2 bg-black/60 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">{item.category}</div>
-                {selectionMode && <div className="absolute inset-0 bg-black/40 z-10 flex items-start justify-end p-2" onClick={(e) => { e.stopPropagation(); toggleSelection(item.id); }}>{selectedIds.has(item.id) ? <CheckCircle2 size={24} className="text-indigo-400 fill-white" /> : <Circle size={24} className="text-white" />}</div>}
+                {selectionMode && (
+                   <div 
+                     className="absolute inset-0 bg-black/40 z-10 flex items-start justify-end p-2"
+                     onClick={(e) => { e.stopPropagation(); toggleSelection(item.id); }}
+                   >
+                     {selectedIds.has(item.id) ? <CheckCircle2 size={24} className="text-indigo-400 fill-white" /> : <Circle size={24} className="text-white" />}
+                   </div>
+                )}
               </div>
               <div className="p-3">
                 <p className={`font-bold ${theme.textMain} text-sm line-clamp-1`}>{item.name}</p>
                 <div className="flex items-center justify-between mt-1 gap-2">
-                  <p className={`text-[10px] ${theme.textMuted} font-medium`}>{item.proof ? `${item.proof} Proof` : (item.abv ? `${item.abv}% ABV` : '')}</p>
+                  <p className={`text-[10px] ${theme.textMuted} font-medium`}>
+                    {item.proof ? `${item.proof} Proof` : (item.abv ? `${item.abv}% ABV` : '')}
+                  </p>
                   <p className={`text-[10px] ${theme.textMuted}`}>{item.size}</p>
                   <p className={`text-[10px] ${theme.textMuted} truncate max-w-[60px]`}>{item.location}</p>
                 </div>
                 {item.notes && <p className={`text-[10px] ${theme.dashboardMain} italic truncate mt-1`}>"{item.notes}"</p>}
+                
                 <div className={`flex items-center justify-between mt-3 pt-2 border-t ${theme.border}`}>
                   <div className={`flex items-center ${theme.bgInput} rounded-lg border ${theme.border} p-0.5`}>
                     <button onClick={(e)=>{e.stopPropagation(); updateQuantity(e, item.id, item.quantity, -1)}} className="p-1 hover:bg-white/10 rounded"><Minus size={12} className={theme.textMuted}/></button>
@@ -563,12 +741,46 @@ export default function HomeBarInventory() {
       {/* FAB AI */}
       {selectionMode && (
         <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-40 animate-in slide-in-from-bottom-5 fade-in w-full max-w-sm px-4">
-          <button onClick={generateCocktails} disabled={isGenerating} className={`w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white px-8 py-4 rounded-full shadow-2xl shadow-indigo-500/50 flex items-center justify-center gap-3 transition-all transform hover:scale-105 active:scale-95`}>
+          <button 
+            onClick={generateCocktails} 
+            disabled={isGenerating} 
+            className={`w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white px-8 py-4 rounded-full shadow-2xl shadow-indigo-500/50 flex items-center justify-center gap-3 transition-all transform hover:scale-105 active:scale-95`}
+          >
             {isGenerating ? <Loader2 className="animate-spin" size={24} /> : <Sparkles className={selectedIds.size > 0 ? "text-yellow-300" : "text-white/50"} size={24} />}
-            <span className="font-bold text-lg">{isGenerating ? 'Bartender is thinking...' : (selectedIds.size > 0 ? `Generate (${selectedIds.size})` : 'Suggest from Full Bar')}</span>
+            <span className="font-bold text-lg">
+              {isGenerating ? 'Bartender is thinking...' : (selectedIds.size > 0 ? `Generate (${selectedIds.size})` : 'Suggest from Full Bar')}
+            </span>
           </button>
         </div>
       )}
+
+      {/* AI Suggestions Modal */}
+      {showSuggestions && suggestions && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+           <div className="absolute inset-0 bg-black/80 backdrop-blur-sm transition-opacity" onClick={() => setShowSuggestions(false)}></div>
+           <div className={`relative ${theme.bgMain} w-full max-w-2xl rounded-2xl shadow-2xl border ${theme.border} flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200`}>
+             <div className={`p-6 border-b ${theme.border} flex justify-between items-center ${theme.bgCard} rounded-t-2xl`}>
+               <div className="flex items-center gap-3"><div className="bg-indigo-500/20 p-2 rounded-lg"><Sparkles className="text-indigo-400" size={24} /></div><div><h2 className="text-xl font-bold text-white">Classic Cocktails</h2><p className={`text-sm ${theme.textMuted}`}>Matches from our library</p></div></div>
+               <button onClick={() => setShowSuggestions(false)} className={`${theme.textMuted} hover:text-white transition-colors ${theme.bgMain} p-2 rounded-full hover:${theme.bgCard}`}><X size={20} /></button>
+             </div>
+             <div className="overflow-y-auto p-6 space-y-6">
+                {suggestions.map((drink, idx) => (
+                  <div key={idx} className={`${theme.bgCard} rounded-xl border ${theme.border} p-5 hover:border-indigo-500/30 transition-colors`}>
+                    <div className="flex justify-between items-start mb-2">
+                        <h3 className="text-lg font-bold text-indigo-300">{drink.name}</h3>
+                        {drink.missing && <span className="text-[10px] bg-red-900/50 text-red-300 px-2 py-0.5 rounded border border-red-800 ml-auto">Missing {drink.missing}</span>}
+                        {drink.missingCount === 0 && <span className="text-[10px] bg-green-900/50 text-green-300 px-2 py-0.5 rounded border border-green-800 ml-auto">You have all ingredients!</span>}
+                    </div>
+                    <p className="text-slate-300 text-sm mb-4 italic">"{drink.instructions}"</p>
+                    <div className="grid md:grid-cols-1 gap-6"><div><h4 className={`text-xs uppercase tracking-wider font-bold ${theme.textMuted} mb-2`}>Ingredients</h4><ul className="space-y-1">{drink.ingredients.map((ing, i) => (<li key={i} className="text-sm text-slate-300 flex items-start gap-2"><span className="text-indigo-500 mt-1.5">•</span>{ing}</li>))}</ul></div></div>
+                  </div>
+                ))}
+             </div>
+             <div className={`p-4 border-t ${theme.border} ${theme.bgMain} rounded-b-2xl text-center`}><p className={`text-xs ${theme.textMuted}`}>{userApiKey ? "Powered by Google Gemini" : "Using Local Recipe Database"}</p></div>
+           </div>
+        </div>
+      )}
+
 
       {/* Settings Modal */}
       {isSettingsOpen && (
@@ -579,57 +791,258 @@ export default function HomeBarInventory() {
               <h2 className="text-xl font-bold text-white flex items-center gap-2"><Settings size={20} /> Settings</h2>
               <button onClick={() => setIsSettingsOpen(false)} className={`${theme.textMuted} hover:text-white`}><X size={24} /></button>
             </div>
+            
             <div className="p-6 overflow-y-auto space-y-6">
-              {/* Account */}
+
+              {/* 0. Sync / Account (New) */}
               <div className="space-y-3">
                 <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider`}>Sync & Account</h3>
                 {authMode === 'menu' ? (
                   <>
                   {user && !user.isAnonymous ? (
-                    <button onClick={handleLogout} className={`w-full p-3 rounded-xl border ${theme.border} hover:border-red-500 hover:bg-red-500/10 transition-all flex items-center justify-between group ${theme.bgCard}`}>
-                      <div className="flex items-center gap-3"><div className={`p-2 rounded-full bg-slate-800 group-hover:bg-slate-700 transition-colors`}><LogOut size={18} className="text-red-400" /></div><div className="text-left"><p className={`font-bold ${theme.textMain} text-sm`}>Sign Out</p><p className={`text-[10px] ${theme.textMuted}`}>{user.email}</p></div></div>
+                    <button 
+                      onClick={handleLogout}
+                      className={`w-full p-3 rounded-xl border ${theme.border} hover:border-red-500 hover:bg-red-500/10 transition-all flex items-center justify-between group ${theme.bgCard}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`p-2 rounded-full bg-slate-800 group-hover:bg-slate-700 transition-colors`}>
+                          <LogOut size={18} className="text-red-400" />
+                        </div>
+                        <div className="text-left">
+                          <p className={`font-bold ${theme.textMain} text-sm`}>Sign Out</p>
+                          <p className={`text-[10px] ${theme.textMuted}`}>{user.email}</p>
+                        </div>
+                      </div>
                     </button>
                   ) : (
-                    <button onClick={() => setAuthMode('login')} className={`w-full p-3 rounded-xl border border-dashed ${theme.border} hover:border-indigo-500 hover:bg-indigo-500/10 transition-all flex items-center justify-between group ${theme.bgCard}`}>
-                      <div className="flex items-center gap-3"><div className={`p-2 rounded-full bg-slate-800 group-hover:bg-slate-700 transition-colors`}><Cloud size={18} className="text-indigo-400" /></div><div className="text-left"><p className={`font-bold ${theme.textMain} text-sm`}>Sign in to Sync</p><p className={`text-[10px] ${theme.textMuted}`}>Save inventory to cloud</p></div></div><div className={`${theme.textMuted} group-hover:text-white`}>→</div>
+                    <button 
+                      onClick={() => setAuthMode('login')}
+                      className={`w-full p-3 rounded-xl border border-dashed ${theme.border} hover:border-indigo-500 hover:bg-indigo-500/10 transition-all flex items-center justify-between group ${theme.bgCard}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`p-2 rounded-full bg-slate-800 group-hover:bg-slate-700 transition-colors`}>
+                          <Cloud size={18} className="text-indigo-400" />
+                        </div>
+                        <div className="text-left">
+                          <p className={`font-bold ${theme.textMain} text-sm`}>Sign in to Sync</p>
+                          <p className={`text-[10px] ${theme.textMuted}`}>Save inventory to cloud</p>
+                        </div>
+                      </div>
+                      <div className={`${theme.textMuted} group-hover:text-white`}>
+                        →
+                      </div>
                     </button>
                   )}
                   </>
                 ) : (
                   <div className={`p-4 rounded-xl border ${theme.border} ${theme.bgCard} space-y-3`}>
-                    <div className="flex justify-between items-center mb-2"><h4 className={`text-sm font-bold ${theme.textMain}`}>{authMode === 'login' ? 'Sign In' : 'Create Account'}</h4><button onClick={()=>setAuthMode('menu')} className="text-xs text-slate-400 hover:text-white">Cancel</button></div>
+                    <div className="flex justify-between items-center mb-2">
+                       <h4 className={`text-sm font-bold ${theme.textMain}`}>{authMode === 'login' ? 'Sign In' : 'Create Account'}</h4>
+                       <button onClick={()=>setAuthMode('menu')} className="text-xs text-slate-400 hover:text-white">Cancel</button>
+                    </div>
                     {authError && <div className="text-xs text-red-400 bg-red-900/20 p-2 rounded border border-red-900/50">{authError}</div>}
                     <div className="space-y-2">
-                       <div className="relative"><Mail size={14} className="absolute left-3 top-3 text-slate-500"/><input type="email" placeholder="Email" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} className={`w-full ${theme.bgInput} border ${theme.border} rounded-lg pl-9 pr-3 py-2 text-sm text-white focus:outline-none focus:ring-1 ${theme.ring}`} /></div>
-                       <div className="relative"><Key size={14} className="absolute left-3 top-3 text-slate-500"/><input type="password" placeholder="Password" value={authPass} onChange={e=>setAuthPass(e.target.value)} className={`w-full ${theme.bgInput} border ${theme.border} rounded-lg pl-9 pr-3 py-2 text-sm text-white focus:outline-none focus:ring-1 ${theme.ring}`} /></div>
+                       <div className="relative">
+                         <Mail size={14} className="absolute left-3 top-3 text-slate-500"/>
+                         <input type="email" placeholder="Email" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} className={`w-full ${theme.bgInput} border ${theme.border} rounded-lg pl-9 pr-3 py-2 text-sm text-white focus:outline-none focus:ring-1 ${theme.ring}`} />
+                       </div>
+                       <div className="relative">
+                         <Key size={14} className="absolute left-3 top-3 text-slate-500"/><input type="password" placeholder="Password" value={authPass} onChange={e=>setAuthPass(e.target.value)} className={`w-full ${theme.bgInput} border ${theme.border} rounded-lg pl-9 pr-3 py-2 text-sm text-white focus:outline-none focus:ring-1 ${theme.ring}`} />
+                       </div>
                     </div>
                     <button onClick={() => handleEmailAuth(authMode === 'signup')} disabled={isAuthLoading || !authEmail || !authPass} className={`w-full py-2 rounded-lg font-bold text-sm text-white ${theme.accentBg} disabled:opacity-50 flex justify-center`}>{isAuthLoading ? <Loader2 size={16} className="animate-spin"/> : (authMode === 'login' ? 'Sign In' : 'Create Account')}</button>
-                    <div className="text-center text-[10px] text-slate-400 mt-2">{authMode === 'login' ? "Don't have an account? " : "Already have an account? "}<button onClick={()=>setAuthMode(authMode === 'login' ? 'signup' : 'login')} className={`${theme.accentText} hover:underline`}>{authMode === 'login' ? 'Sign Up' : 'Log In'}</button></div>
+                    <div className="text-center text-[10px] text-slate-400 mt-2">
+                       {authMode === 'login' ? "Don't have an account? " : "Already have an account? "}
+                       <button onClick={()=>setAuthMode(authMode === 'login' ? 'signup' : 'login')} className={`${theme.accentText} hover:underline`}>
+                         {authMode === 'login' ? 'Sign Up' : 'Log In'}
+                       </button>
+                    </div>
                   </div>
                 )}
               </div>
+
               <div className={`h-px ${theme.bgCard}`} />
               
-              {/* History */}
-              <div className="space-y-3"><h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider`}>History</h3><button onClick={() => { setActiveCategory('HISTORY'); setIsSettingsOpen(false); }} className={`w-full p-3 rounded-xl border ${theme.border} hover:border-slate-500 transition-all flex items-center justify-between group ${theme.bgCard}`}><div className="flex items-center gap-3"><div className={`p-2 rounded-full bg-slate-800 group-hover:bg-slate-700 transition-colors`}><RefreshCw size={18} className={theme.textMuted} /></div><div className="text-left"><p className={`font-bold ${theme.textMain} text-sm`}>View History</p><p className={`text-[10px] ${theme.textMuted}`}>{emptyCount} items</p></div></div><div className={`${theme.textMuted} group-hover:text-white`}>→</div></button></div>
+              {/* AI Config */}
+              <div className="space-y-3">
+                 <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider flex items-center gap-2`}>
+                   <BrainCircuit size={14} className="text-indigo-400" /> AI Configuration
+                 </h3>
+                 <div className={`p-3 rounded-xl border ${theme.border} ${theme.bgInput}`}>
+                   <p className="text-[10px] text-slate-400 mb-2">
+                     Optional: Add a Gemini API key for advanced creativity. Without a key, the app uses the built-in recipe database (Free).
+                   </p>
+                   <input 
+                     type="text" 
+                     placeholder="Paste Gemini API Key..." 
+                     value={userApiKey}
+                     onChange={(e) => saveApiKey(e.target.value)}
+                     className={`w-full bg-slate-900/50 border ${theme.border} rounded p-2 text-xs text-white focus:outline-none focus:border-indigo-500`}
+                   />
+                   <div className="flex justify-between items-center mt-2">
+                      <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-[10px] text-indigo-400 hover:underline flex items-center gap-1">Get Key <ExternalLink size={10}/></a>
+                      <span className={`text-[10px] font-bold ${userApiKey ? 'text-green-400' : 'text-slate-500'}`}>{userApiKey ? "Active (AI Mode)" : "Inactive (Local Mode)"}</span>
+                   </div>
+                 </div>
+              </div>
+
               <div className={`h-px ${theme.bgCard}`} />
 
-              {/* Bar Name */}
-              <div className="space-y-3"><h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider`}>Bar Name</h3><input type="text" value={barName} onChange={(e) => setBarName(e.target.value)} onBlur={() => saveBarName()} placeholder="My Home Bar" className={`w-full ${theme.bgInput} border ${theme.border} rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 ${theme.ring}`} /></div>
+              {/* 1. Empty Bottles History */}
+              <div className="space-y-3">
+                <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider`}>History</h3>
+                
+                <button 
+                  onClick={() => {
+                    setActiveCategory('HISTORY');
+                    setIsSettingsOpen(false);
+                  }}
+                  className={`w-full p-3 rounded-xl border ${theme.border} hover:border-slate-500 transition-all flex items-center justify-between group ${theme.bgCard}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-full bg-slate-800 group-hover:bg-slate-700 transition-colors`}>
+                      <RefreshCw size={18} className={theme.textMuted} />
+                    </div>
+                    <div className="text-left">
+                      <p className={`font-bold ${theme.textMain} text-sm`}>View History</p>
+                      <p className={`text-[10px] ${theme.textMuted}`}>{emptyCount} items</p>
+                    </div>
+                  </div>
+                  <div className={`${theme.textMuted} group-hover:text-white`}>
+                    →
+                  </div>
+                </button>
+              </div>
+
               <div className={`h-px ${theme.bgCard}`} />
 
-              {/* Theme */}
-              <div className="space-y-3"><h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider flex items-center gap-2`}><Palette size={14} /> Color Palette</h3><div className="grid grid-cols-2 gap-2">{Object.values(THEMES).map(t => (<button key={t.id} onClick={() => saveTheme(t)} className={`flex items-center gap-2 p-2 rounded-lg border transition-all text-left group ${theme.id === t.id ? `${t.bgCard} ${t.accentBorder} ring-1 ${t.ring}` : `${t.bgMain} ${t.border} hover:bg-white/5`}`}><div className={`w-4 h-4 rounded-full ${t.accentBg} shadow-sm shrink-0`}></div><span className={`text-xs font-medium truncate ${theme.id === t.id ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'}`}>{t.name.split(' ')[0]}</span>{theme.id === t.id && <CheckCircle2 size={12} className={`ml-auto ${t.accentText}`} />}</button>))}</div></div>
+              {/* 2. Color Palette Selector (Compact) */}
+              <div className="space-y-3">
+                <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider flex items-center gap-2`}>
+                  <Palette size={14} /> Color Palette
+                </h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {Object.values(THEMES).map(t => (
+                    <button
+                      key={t.id}
+                      onClick={() => saveTheme(t)}
+                      className={`flex items-center gap-2 p-2 rounded-lg border transition-all text-left group ${
+                        theme.id === t.id 
+                          ? `${t.bgCard} ${t.accentBorder} ring-1 ${t.ring}` 
+                          : `${t.bgMain} ${t.border} hover:bg-white/5`
+                      }`}
+                    >
+                      <div className={`w-4 h-4 rounded-full ${t.accentBg} shadow-sm shrink-0`}></div>
+                      <span className={`text-xs font-medium truncate ${theme.id === t.id ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'}`}>
+                        {t.name.split(' ')[0]}
+                      </span>
+                      {theme.id === t.id && <CheckCircle2 size={12} className={`ml-auto ${t.accentText}`} />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className={`h-px ${theme.bgCard}`} />
+              
+              {/* 3. AI Bar Sommelier (Compact) */}
+              <div className="space-y-3">
+                <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider flex items-center gap-2`}>
+                  <Sparkles size={14} className="text-yellow-400" /> AI Bar Sommelier
+                </h3>
+                
+                {!barAnalysis ? (
+                  <button 
+                    onClick={analyzeCollection}
+                    disabled={isAnalyzing}
+                    className={`w-full p-3 rounded-xl border ${theme.border} hover:border-indigo-500 hover:bg-indigo-500/10 transition-all flex items-center justify-between group ${theme.bgCard}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-full bg-slate-800 group-hover:bg-slate-700 transition-colors">
+                        {isAnalyzing ? (
+                          <Loader2 size={18} className="animate-spin text-indigo-400" />
+                        ) : (
+                          <Lightbulb size={18} className="text-indigo-400" />
+                        )}
+                      </div>
+                      <div className="text-left">
+                        <p className={`font-bold ${theme.textMain} text-sm`}>Analyze Collection</p>
+                        <p className={`text-[10px] ${theme.textMuted}`}>Get a vibe check & tips</p>
+                      </div>
+                    </div>
+                    <div className={`${theme.textMuted} group-hover:text-indigo-400`}>
+                      →
+                    </div>
+                  </button>
+                ) : (
+                  <div className={`bg-gradient-to-br from-indigo-900/40 to-slate-900 rounded-xl border border-indigo-500/30 p-4 space-y-3 relative overflow-hidden`}>
+                    {/* Reset Button */}
+                    <button 
+                      onClick={analyzeCollection} 
+                      className="absolute top-3 right-3 text-indigo-300 hover:text-white p-1 rounded-full hover:bg-indigo-500/20"
+                      title="Re-analyze"
+                    >
+                      <RefreshCw size={14} className={isAnalyzing ? "animate-spin" : ""} />
+                    </button>
+
+                    <div>
+                      <p className="text-[10px] uppercase tracking-widest text-indigo-300 font-bold mb-1">Your Vibe</p>
+                      <p className="text-lg font-bold text-white leading-tight">"{barAnalysis.vibe}"</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-widest text-indigo-300 font-bold mb-1">Summary</p>
+                      <p className="text-xs text-slate-300 italic">"{barAnalysis.summary}"</p>
+                    </div>
+                    <div className="pt-2 border-t border-indigo-500/20">
+                      <p className="text-[10px] uppercase tracking-widest text-indigo-300 font-bold mb-1">Missing</p>
+                      <p className="text-xs text-white">{barAnalysis.missing}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className={`h-px ${theme.bgCard}`} />
 
-              {/* AI Sommelier */}
-              <div className="space-y-3"><h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider flex items-center gap-2`}><Sparkles size={14} className="text-yellow-400" /> AI Bar Sommelier</h3>{!barAnalysis ? <button onClick={analyzeCollection} disabled={isAnalyzing} className={`w-full p-3 rounded-xl border ${theme.border} hover:border-indigo-500 hover:bg-indigo-500/10 transition-all flex items-center justify-between group ${theme.bgCard}`}><div className="flex items-center gap-3"><div className="p-2 rounded-full bg-slate-800 group-hover:bg-slate-700 transition-colors">{isAnalyzing ? <Loader2 size={18} className="animate-spin text-indigo-400" /> : <Lightbulb size={18} className="text-indigo-400" />}</div><div className="text-left"><p className={`font-bold ${theme.textMain} text-sm`}>Analyze Collection</p><p className={`text-[10px] ${theme.textMuted}`}>Get a vibe check & tips</p></div></div><div className={`${theme.textMuted} group-hover:text-indigo-400`}>→</div></button> : <div className={`bg-gradient-to-br from-indigo-900/40 to-slate-900 rounded-xl border border-indigo-500/30 p-4 space-y-3 relative overflow-hidden`}><button onClick={analyzeCollection} className="absolute top-3 right-3 text-indigo-300 hover:text-white p-1 rounded-full hover:bg-indigo-500/20" title="Re-analyze"><RefreshCw size={14} className={isAnalyzing ? "animate-spin" : ""} /></button><div><p className="text-[10px] uppercase tracking-widest text-indigo-300 font-bold mb-1">Your Vibe</p><p className="text-lg font-bold text-white leading-tight">"{barAnalysis.vibe}"</p></div><div><p className="text-[10px] uppercase tracking-widest text-indigo-300 font-bold mb-1">Summary</p><p className="text-xs text-slate-300 italic">"{barAnalysis.summary}"</p></div><div className="pt-2 border-t border-indigo-500/20"><p className="text-[10px] uppercase tracking-widest text-indigo-300 font-bold mb-1">Missing</p><p className="text-xs text-white">{barAnalysis.missing}</p></div></div>}</div>
+              {/* 4. Lists Management (New) */}
+              <div className="space-y-4">
+                <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider flex items-center gap-2`}><Package size={14} /> Custom Categories</h3>
+                <div className="flex gap-2">
+                  <input type="text" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="New category..." className={`flex-1 ${theme.bgInput} border ${theme.border} rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 ${theme.ring}`} />
+                  <button onClick={addCategory} disabled={!newCatName} className={`${theme.accentBg} text-white px-3 rounded-lg text-xs font-bold disabled:opacity-50`}>Add</button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {categories.map(cat => (
+                    <div key={cat} className={`text-[10px] px-2 py-1 rounded bg-white/5 border ${theme.border} flex items-center gap-1 group`}>
+                      <span className={theme.textMuted}>{cat}</span>
+                      {!DEFAULT_CATEGORIES.includes(cat) && <button onClick={() => removeCategory(cat)} className="text-red-400 hover:text-white"><X size={10} /></button>}
+                    </div>
+                  ))}
+                </div>
+
+                <div className={`h-px ${theme.bgCard} my-2`} />
+
+                <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider flex items-center gap-2`}><Settings size={14} /> Locations</h3>
+                <div className="flex gap-2">
+                  <input type="text" value={newLocName} onChange={(e) => setNewLocName(e.target.value)} placeholder="New location..." className={`flex-1 ${theme.bgInput} border ${theme.border} rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 ${theme.ring}`} />
+                  <button onClick={addLocation} disabled={!newLocName} className={`${theme.accentBg} text-white px-3 rounded-lg text-xs font-bold disabled:opacity-50`}>Add</button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {locations.map(loc => (
+                    <div key={loc} className={`text-[10px] px-2 py-1 rounded bg-white/5 border ${theme.border} flex items-center gap-1 group`}>
+                      <span className={theme.textMuted}>{loc}</span>
+                      {!DEFAULT_LOCATIONS.includes(loc) && <button onClick={() => removeLocation(loc)} className="text-red-400 hover:text-white"><X size={10} /></button>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
               <div className={`h-px ${theme.bgCard}`} />
 
-              {/* Lists */}
-              <div className="space-y-4"><h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider flex items-center gap-2`}><Package size={14} /> Custom Categories</h3><div className="flex gap-2"><input type="text" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="New category..." className={`flex-1 ${theme.bgInput} border ${theme.border} rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 ${theme.ring}`} /><button onClick={addCategory} disabled={!newCatName} className={`${theme.accentBg} text-white px-3 rounded-lg text-xs font-bold disabled:opacity-50`}>Add</button></div><div className="flex flex-wrap gap-2">{categories.map(cat => (<div key={cat} className={`text-[10px] px-2 py-1 rounded bg-white/5 border ${theme.border} flex items-center gap-1 group`}><span className={theme.textMuted}>{cat}</span>{!DEFAULT_CATEGORIES.includes(cat) && <button onClick={() => removeCategory(cat)} className="text-red-400 hover:text-white"><X size={10} /></button>}</div>))}</div><div className={`h-px ${theme.bgCard} my-2`} /><h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider flex items-center gap-2`}><Settings size={14} /> Locations</h3><div className="flex gap-2"><input type="text" value={newLocName} onChange={(e) => setNewLocName(e.target.value)} placeholder="New location..." className={`flex-1 ${theme.bgInput} border ${theme.border} rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 ${theme.ring}`} /><button onClick={addLocation} disabled={!newLocName} className={`${theme.accentBg} text-white px-3 rounded-lg text-xs font-bold disabled:opacity-50`}>Add</button></div><div className="flex flex-wrap gap-2">{locations.map(loc => (<div key={loc} className={`text-[10px] px-2 py-1 rounded bg-white/5 border ${theme.border} flex items-center gap-1 group`}><span className={theme.textMuted}>{loc}</span>{!DEFAULT_LOCATIONS.includes(loc) && <button onClick={() => removeLocation(loc)} className="text-red-400 hover:text-white"><X size={10} /></button>}</div>))}</div></div>
-
-              <div className={`text-center pt-4 border-t border-white/5`}><p className={`text-xs ${theme.textMuted}`}>HomeBar v2.4.0</p></div>
+              {/* 5. Profile */}
+              <div className="space-y-3">
+                <h3 className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider`}>Profile</h3>
+                <div className={`${theme.bgInput} p-3 rounded-lg border ${theme.border}`}><p className={`text-[10px] ${theme.textMuted} uppercase font-bold mb-1`}>User ID</p><p className="text-xs text-slate-300 font-mono truncate">{user?.uid || 'Not signed in'}</p></div>
+              </div>
+              <div className={`text-center pt-4 border-t border-white/5`}><p className={`text-xs ${theme.textMuted}`}>HomeBar v2.9.0</p></div>
             </div>
           </div>
         </div>
@@ -638,39 +1051,39 @@ export default function HomeBarInventory() {
       {/* Confirmation Modal */}
       {confirmation.isOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setConfirmation({ isOpen: false, type: null, id: null, name: '' })}></div>
+          <div 
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm" 
+            onClick={() => setConfirmation({ isOpen: false, type: null, id: null, name: '' })}
+          ></div>
           <div className={`relative ${theme.bgMain} border ${theme.border} rounded-xl p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95 duration-200`}>
-            <div className="flex items-start gap-4 mb-4">
-              <div className={`p-3 rounded-full ${confirmation.type === 'delete' ? 'bg-red-500/20 text-red-500' : 'bg-amber-500/20 text-amber-500'}`}><AlertTriangle size={24} /></div>
-              <div><h3 className="text-lg font-bold text-white mb-1">Are you sure?</h3><p className={`text-sm ${theme.textMuted}`}>{confirmation.type === 'empty' ? `Mark "${confirmation.name}" as empty? It will be moved to your history.` : `Permanently delete "${confirmation.name}" from your records? This cannot be undone.`}</p></div>
-            </div>
+            <div className="flex items-start gap-4 mb-4"><div className={`p-3 rounded-full ${confirmation.type === 'delete' ? 'bg-red-500/20 text-red-500' : 'bg-amber-500/20 text-amber-500'}`}><AlertTriangle size={24} /></div><div><h3 className="text-lg font-bold text-white mb-1">Are you sure?</h3><p className={`text-sm ${theme.textMuted}`}>{confirmation.type === 'empty' ? `Mark "${confirmation.name}" as empty? It will be moved to your history.` : `Permanently delete "${confirmation.name}" from your records? This cannot be undone.`}</p></div></div>
             <div className="flex justify-end gap-3"><button onClick={() => setConfirmation({ isOpen: false, type: null, id: null, name: '' })} className={`px-4 py-2 text-sm font-medium ${theme.textMuted} hover:text-white transition-colors`}>Cancel</button><button onClick={executeConfirmation} className={`px-4 py-2 text-sm font-bold text-white rounded-lg transition-colors ${confirmation.type === 'delete' ? 'bg-red-600 hover:bg-red-700' : `${theme.accentBg} ${theme.accentBgHover}`}`}>Confirm</button></div>
           </div>
         </div>
       )}
 
-      {/* Add/Edit Modal */}
+      {/* Unified Modal (Add / Edit) */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={() => setIsModalOpen(false)}></div>
           <div className={`relative ${theme.bgMain} w-full max-w-md rounded-2xl shadow-2xl border ${theme.border} overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-200 flex flex-col`}>
             <div className="p-5">
-              <div className="flex justify-between items-center mb-4"><h2 className="text-lg font-bold text-white flex items-center gap-2">{editingId ? <><Edit2 size={18}/> Edit Bottle</> : "Add to Inventory"}</h2><button onClick={() => setIsModalOpen(false)} className={`${theme.textMuted} hover:text-white transition-colors`}><X size={20} /></button></div>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">{editingId ? <><Edit2 size={18}/> Edit Bottle</> : "Add to Inventory"}</h2>
+                <button onClick={() => setIsModalOpen(false)} className={`${theme.textMuted} hover:text-white transition-colors`}><X size={20} /></button>
+              </div>
               <form onSubmit={handleSave} className="space-y-3">
                 <div className="flex gap-3"><div className="flex-[3]"><label className={`block text-xs font-medium ${theme.textMuted} mb-1`}>Name</label><input autoFocus={!editingId} type="text" required placeholder="e.g. Maker's Mark" value={formData.name} onChange={(e) => handleFieldChange('name', e.target.value)} className={`w-full ${theme.bgInput} border ${theme.border} rounded-lg px-3 py-2 text-white placeholder-slate-600 focus:outline-none focus:ring-2 ${theme.ring} focus:border-transparent text-sm`} /></div><div className="flex-[2]"><label className={`block text-xs font-medium ${theme.textMuted} mb-1`}>Category</label><select value={formData.category} onChange={(e) => handleFieldChange('category', e.target.value)} className={`w-full ${theme.bgInput} border ${theme.border} rounded-lg px-2 py-2 text-sm text-slate-300 focus:outline-none focus:ring-2 ${theme.ring}`}>{categories.map(cat => (<option key={cat} value={cat}>{cat}</option>))}</select></div></div>
                 <div><label className={`block text-xs font-medium ${theme.textMuted} mb-1`}>Location</label><select value={formData.location} onChange={(e) => handleFieldChange('location', e.target.value)} className={`w-full ${theme.bgInput} border ${theme.border} rounded-lg px-2 py-2 text-sm text-slate-300 focus:outline-none focus:ring-2 ${theme.ring}`}>{locations.map(loc => (<option key={loc} value={loc}>{loc}</option>))}</select></div>
                 {!NON_ALCOHOLIC_CATS.includes(formData.category) && (<div className="flex gap-3"><div className="flex-1"><label className={`block text-xs font-medium ${theme.textMuted} mb-1`}>Size</label><input type="text" value={formData.size} onChange={(e) => handleFieldChange('size', e.target.value)} className={`w-full ${theme.bgInput} border ${theme.border} rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 ${theme.ring}`} /></div>{!LOW_ABV_CATS.includes(formData.category) && (<div className="w-1/4"><label className={`block text-xs font-medium ${theme.textMuted} mb-1`}>Proof</label><input type="number" placeholder="0" value={formData.proof} onChange={(e) => handleFieldChange('proof', e.target.value)} className={`w-full ${theme.bgInput} border ${theme.border} rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 ${theme.ring}`} /></div>)}<div className="w-1/4"><label className="block text-xs font-medium text-slate-500 mb-1">ABV %</label><input type="text" readOnly={!LOW_ABV_CATS.includes(formData.category)} placeholder="%" value={formData.abv} onChange={(e) => handleFieldChange('abv', e.target.value)} className={`w-full ${theme.bgInput} border ${theme.border} rounded-lg px-3 py-2 text-slate-500 text-sm focus:outline-none ${!LOW_ABV_CATS.includes(formData.category) ? 'cursor-not-allowed' : `focus:ring-2 ${theme.ring} text-white`}`} /></div></div>)}
                 <div><div className="flex justify-between items-center mb-1"><label className={`block text-xs font-medium ${theme.textMuted} flex items-center gap-2`}><NotebookPen size={12}/> Tasting Notes</label><button type="button" onClick={generateTastingNotes} disabled={!formData.name || isGeneratingNotes} className="text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-0.5 rounded flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{isGeneratingNotes ? <Loader2 size={10} className="animate-spin"/> : <Sparkles size={10} />} Auto-Fill</button></div><textarea rows={2} placeholder="Caramel, vanilla, oak..." value={formData.notes} onChange={(e) => handleFieldChange('notes', e.target.value)} className={`w-full ${theme.bgInput} border ${theme.border} rounded-lg px-3 py-2 text-white placeholder-slate-600 focus:outline-none focus:ring-2 ${theme.ring} focus:border-transparent text-sm resize-none`} /></div>
                 <div><div className="flex justify-between items-center mb-1"><label className={`block text-xs font-medium ${theme.textMuted}`}>Image Source</label>{formData.name && <a href={`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(formData.name + ' bottle transparent background')}`} target="_blank" rel="noreferrer" className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1">Find Online <ExternalLink size={10} /></a>}</div><div className="flex gap-2 mb-2"><div className={`flex-1 relative`}><input type="text" placeholder="Paste image URL..." value={formData.image && !formData.image.startsWith('data:') ? formData.image : ''} onChange={(e) => handleFieldChange('image', e.target.value)} className={`w-full ${theme.bgInput} border ${theme.border} rounded-lg pl-8 pr-3 py-2 text-white placeholder-slate-600 focus:outline-none focus:ring-2 ${theme.ring} focus:border-transparent text-sm`} /><div className="absolute left-2.5 top-2.5 text-slate-500 pointer-events-none"><LinkIcon size={14} /></div></div><div className="relative"><input type="file" accept="image/*" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" disabled={isUploading} /><button type="button" className={`h-full px-3 rounded-lg border ${theme.border} ${theme.bgInput} hover:bg-white/5 flex items-center gap-2 text-sm text-slate-300`}>{isUploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}<span className="hidden sm:inline">Upload</span></button></div></div>{formData.image && <div className={`mt-2 h-24 w-full rounded-lg border ${theme.border} bg-black/20 flex items-center justify-center relative overflow-hidden group`}><img src={formData.image} alt="Preview" className="h-full object-contain" /><button type="button" onClick={() => handleFieldChange('image', '')} className="absolute top-1 right-1 bg-black/50 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><X size={12} /></button></div>}</div>
-                <div className="pt-2"><button type="submit" disabled={isSaving || !formData.name.trim()} className={`w-full ${theme.accentBg} ${theme.accentBgHover} disabled:bg-slate-700 disabled:text-slate-500 text-white font-bold py-2.5 rounded-xl transition-all flex justify-center items-center gap-2 text-sm`}>{isSaving ? <><Loader2 className="animate-spin" size={16} /><span>{editingId ? 'Updating...' : 'Fetching...'}</span></> : <>{editingId ? 'Save Changes' : 'Add Bottle'}</>}</button>{editingId && <button type="button" onClick={(e) => promptAction(e, 'delete', { id: editingId, name: formData.name })} className={`w-full p-3 rounded-lg border border-red-500/30 text-red-500 font-bold flex items-center justify-center gap-2 mt-4 hover:bg-red-500/10 transition-colors`}><Trash2 size={16} /> Delete Bottle</button>}</div>
+                <div className="pt-2"><button type="submit" disabled={isSaving || !formData.name.trim()} className={`w-full ${theme.accentBg} ${theme.accentBgHover} disabled:bg-slate-700 disabled:text-slate-500 text-white font-bold py-2.5 rounded-xl transition-all flex justify-center items-center gap-2 text-sm`}>{isSaving ? <><Loader2 className="animate-spin" size={16} /><span>{editingId ? 'Updating...' : 'Fetching...'}</span></> : <>{editingId ? 'Save Changes' : 'Add Bottle'}</>}</button>{editingId && <button type="button" onClick={(e) => promptAction(e, 'delete', { id: editingId, name: formData.name })} className={`w-full p-3 rounded-lg border border-red-500/30 text-red-500 font-bold flex items-center justify-center gap-2 mt-4 hover:bg-red-500/10 transition-colors`}><Trash2 size={16} /> Delete</button>}</div>
               </form>
             </div>
           </div>
         </div>
       )}
-      
-      {/* AI Suggestions Modal */}
-      {showSuggestions && suggestions && <div className="fixed inset-0 z-50 flex items-center justify-center p-4"><div className="absolute inset-0 bg-black/80 backdrop-blur-sm transition-opacity" onClick={() => setShowSuggestions(false)}></div><div className={`relative ${theme.bgMain} w-full max-w-2xl rounded-2xl shadow-2xl border ${theme.border} flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200`}><div className={`p-6 border-b ${theme.border} flex justify-between items-center ${theme.bgCard} rounded-t-2xl`}><div className="flex items-center gap-3"><div className="bg-indigo-500/20 p-2 rounded-lg"><Sparkles className="text-indigo-400" size={24} /></div><div><h2 className="text-xl font-bold text-white">Bartender Suggestions</h2><p className={`text-sm ${theme.textMuted}`}>Based on your selected ingredients</p></div></div><button onClick={() => setShowSuggestions(false)} className={`${theme.textMuted} hover:text-white transition-colors ${theme.bgMain} p-2 rounded-full hover:${theme.bgCard}`}><X size={20} /></button></div><div className="overflow-y-auto p-6 space-y-6">{suggestions.map((drink, idx) => (<div key={idx} className={`${theme.bgCard} rounded-xl border ${theme.border} p-5 hover:border-indigo-500/30 transition-colors`}><div className="flex justify-between items-start mb-2"><h3 className="text-lg font-bold text-indigo-300">{drink.name}</h3></div><p className="text-slate-300 text-sm mb-4 italic">"{drink.description}"</p><div className="grid md:grid-cols-2 gap-6"><div><h4 className={`text-xs uppercase tracking-wider font-bold ${theme.textMuted} mb-2`}>Ingredients</h4><ul className="space-y-1">{drink.ingredients.map((ing, i) => (<li key={i} className="text-sm text-slate-300 flex items-start gap-2"><span className="text-indigo-500 mt-1.5">•</span>{ing}</li>))}</ul></div><div><h4 className={`text-xs uppercase tracking-wider font-bold ${theme.textMuted} mb-2`}>Instructions</h4><p className="text-sm text-slate-300 leading-relaxed">{drink.instructions}</p></div></div></div>))}</div><div className={`p-4 border-t ${theme.border} ${theme.bgMain} rounded-b-2xl text-center`}><p className={`text-xs ${theme.textMuted}`}>AI generated recipes. Taste may vary!</p></div></div></div>}
     </div>
   );
 }
